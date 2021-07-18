@@ -8,7 +8,7 @@ moduleFor(
   'Helpers test: {{fn}}',
   class extends RenderingTestCase {
     beforeEach() {
-      this.registerHelper('invoke', function([fn]) {
+      this.registerHelper('invoke', function ([fn]) {
         return fn();
       });
 
@@ -120,38 +120,6 @@ moduleFor(
       assert.equal(this.stashedFn(), 'arg1: foo, arg2: bar');
     }
 
-    '@test asserts if the first argument is not a function'() {
-      expectAssertion(() => {
-        this.render(`{{invoke (fn this.myFunc this.arg1 this.arg2)}}`, {
-          myFunc: null,
-          arg1: 'foo',
-          arg2: 'bar',
-        });
-      }, /You must pass a function as the `fn` helpers first argument, you passed null/);
-    }
-
-    '@test asserts if the provided function accesses `this` without being bound prior to passing to fn'(
-      assert
-    ) {
-      if (!HAS_NATIVE_PROXY) {
-        assert.expect(0);
-        return;
-      }
-
-      this.render(`{{stash stashedFn=(fn this.myFunc this.arg1)}}`, {
-        myFunc(arg1) {
-          return `arg1: ${arg1}, arg2: ${this.arg2}`;
-        },
-
-        arg1: 'foo',
-        arg2: 'bar',
-      });
-
-      expectAssertion(() => {
-        this.stashedFn();
-      }, /You accessed `this.arg2` from a function passed to the `fn` helper, but the function itself was not bound to a valid `this` context. Consider updating to usage of `@action`./);
-    }
-
     '@test there is no `this` context within the callback'(assert) {
       if (DEBUG && HAS_NATIVE_PROXY) {
         assert.expect(0);
@@ -223,6 +191,19 @@ moduleFor(
       runTask(() => this.stashedFn());
 
       this.assertText('bar');
+    }
+
+    '@test can be used on the result of `mut` with a falsy value'() {
+      this.render(`{{this.arg1}}{{stash stashedFn=(fn (mut this.arg1) this.arg2)}}`, {
+        arg1: 'foo',
+        arg2: false,
+      });
+
+      this.assertText('foo');
+
+      runTask(() => this.stashedFn());
+
+      this.assertText('false');
     }
   }
 );

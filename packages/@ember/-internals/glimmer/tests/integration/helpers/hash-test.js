@@ -2,13 +2,14 @@ import { RenderingTestCase, moduleFor, runTask } from 'internal-test-helpers';
 
 import { Component } from '../../utils/helpers';
 
-import { set } from '@ember/-internals/metal';
+import { set, computed } from '@ember/-internals/metal';
+import { HAS_NATIVE_PROXY } from '@ember/-internals/utils';
 
 moduleFor(
   'Helpers test: {{hash}}',
   class extends RenderingTestCase {
     ['@test returns a hash with the right key-value']() {
-      this.render(`{{#with (hash name=\"Sergio\") as |person|}}{{person.name}}{{/with}}`);
+      this.render(`{{#let (hash name="Sergio") as |person|}}{{person.name}}{{/let}}`);
 
       this.assertText('Sergio');
 
@@ -19,7 +20,7 @@ moduleFor(
 
     ['@test can have more than one key-value']() {
       this.render(
-        `{{#with (hash name="Sergio" lastName="Arbeo") as |person|}}{{person.name}} {{person.lastName}}{{/with}}`
+        `{{#let (hash name="Sergio" lastName="Arbeo") as |person|}}{{person.name}} {{person.lastName}}{{/let}}`
       );
 
       this.assertText('Sergio Arbeo');
@@ -31,7 +32,7 @@ moduleFor(
 
     ['@test binds values when variables are used']() {
       this.render(
-        `{{#with (hash name=this.model.firstName lastName="Arbeo") as |person|}}{{person.name}} {{person.lastName}}{{/with}}`,
+        `{{#let (hash name=this.model.firstName lastName="Arbeo") as |person|}}{{person.name}} {{person.lastName}}{{/let}}`,
         {
           model: {
             firstName: 'Marisa',
@@ -56,7 +57,7 @@ moduleFor(
 
     ['@test binds multiple values when variables are used']() {
       this.render(
-        `{{#with (hash name=this.model.firstName lastName=this.model.lastName) as |person|}}{{person.name}} {{person.lastName}}{{/with}}`,
+        `{{#let (hash name=this.model.firstName lastName=this.model.lastName) as |person|}}{{person.name}} {{person.lastName}}{{/let}}`,
         {
           model: {
             firstName: 'Marisa',
@@ -91,7 +92,7 @@ moduleFor(
 
     ['@test hash helpers can be nested']() {
       this.render(
-        `{{#with (hash person=(hash name=this.model.firstName)) as |ctx|}}{{ctx.person.name}}{{/with}}`,
+        `{{#let (hash person=(hash name=this.model.firstName)) as |ctx|}}{{ctx.person.name}}{{/let}}`,
         {
           model: { firstName: 'Balint' },
         }
@@ -156,7 +157,7 @@ moduleFor(
 
       this.registerComponent('foo-bar', {
         ComponentClass: FooBarComponent,
-        template: `{{yield (hash firstName=this.model.firstName lastName=lastName)}}`,
+        template: `{{yield (hash firstName=this.model.firstName lastName=this.lastName)}}`,
       });
 
       this.render(
@@ -185,6 +186,133 @@ moduleFor(
       });
 
       this.assertText('Chad Hietala');
+    }
+
+    ['@test works with computeds']() {
+      let FooBarComponent = Component.extend({
+        fullName: computed('hash.firstName', 'hash.lastName', function () {
+          return `${this.hash.firstName} ${this.hash.lastName}`;
+        }),
+      });
+
+      this.registerComponent('foo-bar', {
+        ComponentClass: FooBarComponent,
+        template: `{{this.fullName}}`,
+      });
+
+      this.render(`{{foo-bar hash=(hash firstName=this.firstName lastName=this.lastName)}}`, {
+        firstName: 'Chad',
+        lastName: 'Hietala',
+      });
+
+      this.assertText('Chad Hietala');
+
+      runTask(() => this.rerender());
+
+      this.assertText('Chad Hietala');
+
+      runTask(() => {
+        set(this.context, 'firstName', 'Godfrey');
+        set(this.context, 'lastName', 'Chan');
+      });
+
+      this.assertText('Godfrey Chan');
+    }
+
+    ['@test works with computeds on non-defined properties']() {
+      let instance;
+
+      let FooBarComponent = Component.extend({
+        init() {
+          this._super(...arguments);
+
+          if (HAS_NATIVE_PROXY) {
+            expectDeprecation(() => {
+              set(this.hash, 'lastName', 'Hietala');
+            }, /You set the '.*' property on a {{hash}} object/);
+          } else {
+            set(this.hash, 'lastName', 'Hietala');
+          }
+
+          instance = this;
+        },
+
+        fullName: computed('hash.firstName', 'hash.lastName', function () {
+          return `${this.hash.firstName} ${this.hash.lastName}`;
+        }),
+      });
+
+      this.registerComponent('foo-bar', {
+        ComponentClass: FooBarComponent,
+        template: `{{this.fullName}}`,
+      });
+
+      this.render(`{{foo-bar hash=(hash firstName=this.firstName)}}`, {
+        firstName: 'Chad',
+        lastName: 'Hietala',
+      });
+
+      this.assertText('Chad Hietala');
+
+      runTask(() => this.rerender());
+
+      this.assertText('Chad Hietala');
+
+      runTask(() => {
+        set(this.context, 'firstName', 'Godfrey');
+
+        if (HAS_NATIVE_PROXY) {
+          expectDeprecation(() => {
+            set(instance.hash, 'lastName', 'Chan');
+          }, /You set the '.*' property on a {{hash}} object/);
+        } else {
+          set(instance.hash, 'lastName', 'Chan');
+        }
+      });
+
+      this.assertText('Godfrey Chan');
+    }
+
+    ['@test works when properties are set dynamically']() {
+      let fooBarInstance;
+      let FooBarComponent = Component.extend({
+        init() {
+          this._super();
+          fooBarInstance = this;
+        },
+      });
+
+      this.registerComponent('foo-bar', {
+        ComponentClass: FooBarComponent,
+        template: `{{this.hash.firstName}} {{this.hash.lastName}}`,
+      });
+
+      this.render(`{{foo-bar hash=(hash firstName=this.firstName)}}`, {
+        firstName: 'Chad',
+      });
+
+      this.assertText('Chad ');
+
+      runTask(() => {
+        if (HAS_NATIVE_PROXY) {
+          expectDeprecation(() => {
+            set(fooBarInstance.hash, 'lastName', 'Hietala');
+          }, /You set the '.*' property on a {{hash}} object/);
+        } else {
+          set(fooBarInstance.hash, 'lastName', 'Hietala');
+        }
+      });
+
+      this.assertText('Chad Hietala');
+
+      runTask(() => {
+        expectDeprecation(() => {
+          set(fooBarInstance.hash, 'firstName', 'Godfrey');
+          set(fooBarInstance.hash, 'lastName', 'Chan');
+        }, /You set the '.*' property on a {{hash}} object/);
+      });
+
+      this.assertText('Godfrey Chan');
     }
   }
 );

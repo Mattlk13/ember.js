@@ -32,10 +32,24 @@ import { moduleFor, AbstractTestCase, runLoopSettled } from 'internal-test-helpe
 // Ember.Observable Tests
 // ========================================================================
 
-let object, ObjectC, ObjectD, objectA, objectB, lookup;
+let object, objectA, objectB, objectC, objectD, objectE, objectF, lookup;
 
 const ObservableObject = EmberObject.extend(Observable);
 const originalLookup = context.lookup;
+
+class ObservableTestCase extends AbstractTestCase {
+  afterEach() {
+    let destroyables = [object, objectA, objectB, objectC, objectD, objectE, objectF].filter(
+      (obj) => obj && obj.destroy
+    );
+
+    object = objectA = objectC = objectD = objectE = objectF = undefined;
+    context.lookup = originalLookup;
+    lookup = undefined;
+    destroyables.forEach((obj) => obj.destroy());
+    return runLoopSettled();
+  }
+}
 
 // ..........................................................
 // GET()
@@ -43,10 +57,10 @@ const originalLookup = context.lookup;
 
 moduleFor(
   'object.get()',
-  class extends AbstractTestCase {
+  class extends ObservableTestCase {
     beforeEach() {
       object = ObservableObject.extend(Observable, {
-        computed: computed(function() {
+        computed: computed(function () {
           return 'value';
         }),
         method() {
@@ -92,10 +106,10 @@ moduleFor(
 //
 moduleFor(
   'Ember.get()',
-  class extends AbstractTestCase {
+  class extends ObservableTestCase {
     beforeEach() {
       objectA = ObservableObject.extend({
-        computed: computed(function() {
+        computed: computed(function () {
           return 'value';
         }),
         method() {
@@ -149,7 +163,7 @@ moduleFor(
     }
 
     ['@test raise if the provided object is undefined']() {
-      expectAssertion(function() {
+      expectAssertion(function () {
         get(undefined, 'key');
       }, /Cannot call get with 'key' on an undefined object/i);
     }
@@ -158,11 +172,11 @@ moduleFor(
 
 moduleFor(
   'Ember.get() with paths',
-  class extends AbstractTestCase {
+  class extends ObservableTestCase {
     ['@test should return a property at a given path relative to the passed object'](assert) {
       let foo = ObservableObject.create({
         bar: ObservableObject.extend({
-          baz: computed(function() {
+          baz: computed(function () {
             return 'blargh';
           }),
         }).create(),
@@ -191,7 +205,7 @@ moduleFor(
 
 moduleFor(
   'object.set()',
-  class extends AbstractTestCase {
+  class extends ObservableTestCase {
     beforeEach() {
       object = ObservableObject.extend({
         computed: computed({
@@ -280,7 +294,7 @@ moduleFor(
 
 moduleFor(
   'Computed properties',
-  class extends AbstractTestCase {
+  class extends ObservableTestCase {
     beforeEach() {
       lookup = context.lookup = {};
 
@@ -301,7 +315,7 @@ moduleFor(
               this.computedCachedCalls.push('getter-called');
               return 'computedCached';
             },
-            set: function(key, value) {
+            set: function (key, value) {
               this.computedCachedCalls.push(value);
             },
           }),
@@ -334,11 +348,11 @@ moduleFor(
             },
           }),
 
-          inc: computed('changer', function() {
+          inc: computed('changer', function () {
             return this.incCallCount++;
           }),
 
-          nestedInc: computed('inc', function() {
+          nestedInc: computed('inc', function () {
             get(this, 'inc');
             return this.nestedIncCallCount++;
           }),
@@ -375,25 +389,22 @@ moduleFor(
         });
       });
     }
-    afterEach() {
-      context.lookup = originalLookup;
-    }
 
     ['@test getting values should call function return value'](assert) {
       // get each property twice. Verify return.
       let keys = w('computed computedCached dependent dependentFront dependentCached');
 
-      keys.forEach(function(key) {
+      keys.forEach(function (key) {
         assert.equal(object.get(key), key, `Try #1: object.get(${key}) should run function`);
         assert.equal(object.get(key), key, `Try #2: object.get(${key}) should run function`);
       });
 
       // verify each call count.  cached should only be called once
-      w('computedCalls dependentFrontCalls dependentCalls').forEach(key => {
+      w('computedCalls dependentFrontCalls dependentCalls').forEach((key) => {
         assert.equal(object[key].length, 2, `non-cached property ${key} should be called 2x`);
       });
 
-      w('computedCachedCalls dependentCachedCalls').forEach(key => {
+      w('computedCachedCalls dependentCachedCalls').forEach((key) => {
         assert.equal(object[key].length, 1, `non-cached property ${key} should be called 1x`);
       });
     }
@@ -403,7 +414,7 @@ moduleFor(
       let keys = w('computed dependent dependentFront computedCached dependentCached');
       let values = w('value1 value2');
 
-      keys.forEach(key => {
+      keys.forEach((key) => {
         assert.equal(
           object.set(key, values[0]),
           values[0],
@@ -419,14 +430,12 @@ moduleFor(
         assert.equal(
           object.set(key, values[1]),
           values[1],
-          `Try #3: object.set(${key}, ${
-            values[1]
-          }) should not run function since it is setting same value as before`
+          `Try #3: object.set(${key}, ${values[1]}) should not run function since it is setting same value as before`
         );
       });
 
       // verify each call count.  cached should only be called once
-      keys.forEach(key => {
+      keys.forEach((key) => {
         let calls = object[key + 'Calls'];
         let idx, expectedLength;
 
@@ -515,7 +524,7 @@ moduleFor(
       assert.equal(object.get('inc'), ret1, 'multiple calls should not run cached prop');
 
       // add observer to verify change...
-      object.addObserver('inc', this, function() {
+      object.addObserver('inc', this, function () {
         assert.equal(object.get('inc'), ret1 + 1, 'should increment after dependent key changes'); // should run again
       });
 
@@ -538,7 +547,7 @@ moduleFor(
 
     ['@test dependent keys should be able to be specified as property paths'](assert) {
       let depObj = ObservableObject.extend({
-        menuPrice: computed('menu.price', function() {
+        menuPrice: computed('menu.price', function () {
           return this.get('menu.price');
         }),
       }).create({
@@ -563,9 +572,9 @@ moduleFor(
 
       let DepObj;
 
-      run(function() {
+      run(function () {
         lookup.DepObj = DepObj = ObservableObject.extend({
-          price: computed('restaurant.menu.price', function() {
+          price: computed('restaurant.menu.price', function () {
             return this.get('restaurant.menu.price');
           }),
         }).create({
@@ -579,7 +588,7 @@ moduleFor(
 
       assert.equal(DepObj.get('price'), 5, 'precond - computed property is correct');
 
-      run(function() {
+      run(function () {
         DepObj.set('restaurant.menu.price', 10);
       });
       assert.equal(
@@ -588,7 +597,7 @@ moduleFor(
         'cacheable computed properties are invalidated even if no run loop occurred'
       );
 
-      run(function() {
+      run(function () {
         DepObj.set('restaurant.menu.price', 20);
       });
       assert.equal(
@@ -602,7 +611,7 @@ moduleFor(
         'precond - computed properties remain correct after a run loop'
       );
 
-      run(function() {
+      run(function () {
         DepObj.set(
           'restaurant.menu',
           ObservableObject.create({
@@ -617,7 +626,7 @@ moduleFor(
         'cacheable computed properties are invalidated after a middle property changes'
       );
 
-      run(function() {
+      run(function () {
         DepObj.set(
           'restaurant.menu',
           ObservableObject.create({
@@ -641,7 +650,7 @@ moduleFor(
 
 moduleFor(
   'Observable objects & object properties ',
-  class extends AbstractTestCase {
+  class extends ObservableTestCase {
     beforeEach() {
       object = ObservableObject.extend({
         getEach() {
@@ -657,11 +666,11 @@ moduleFor(
           this.abnormal = 'changedValueObserved';
         },
 
-        testObserver: observer('normal', function() {
+        testObserver: observer('normal', function () {
           this.abnormal = 'removedObserver';
         }),
 
-        testArrayObserver: observer('normalArray.[]', function() {
+        testArrayObserver: observer('normalArray.[]', function () {
           this.abnormal = 'notifiedObserver';
         }),
       }).create({
@@ -692,15 +701,15 @@ moduleFor(
       newValue = object.incrementProperty('numberVal', 0);
       assert.equal(25, newValue, 'zero numerical value incremented by specified increment');
 
-      expectAssertion(function() {
+      expectAssertion(function () {
         newValue = object.incrementProperty('numberVal', 0 - void 0); // Increment by NaN
       }, /Must pass a numeric value to incrementProperty/i);
 
-      expectAssertion(function() {
+      expectAssertion(function () {
         newValue = object.incrementProperty('numberVal', 'Ember'); // Increment by non-numeric String
       }, /Must pass a numeric value to incrementProperty/i);
 
-      expectAssertion(function() {
+      expectAssertion(function () {
         newValue = object.incrementProperty('numberVal', 1 / 0); // Increment by Infinity
       }, /Must pass a numeric value to incrementProperty/i);
 
@@ -720,15 +729,15 @@ moduleFor(
       newValue = object.decrementProperty('numberVal', 0);
       assert.equal(25, newValue, 'zero numerical value decremented by specified increment');
 
-      expectAssertion(function() {
+      expectAssertion(function () {
         newValue = object.decrementProperty('numberVal', 0 - void 0); // Decrement by NaN
       }, /Must pass a numeric value to decrementProperty/i);
 
-      expectAssertion(function() {
+      expectAssertion(function () {
         newValue = object.decrementProperty('numberVal', 'Ember'); // Decrement by non-numeric String
       }, /Must pass a numeric value to decrementProperty/i);
 
-      expectAssertion(function() {
+      expectAssertion(function () {
         newValue = object.decrementProperty('numberVal', 1 / 0); // Decrement by Infinity
       }, /Must pass a numeric value to decrementProperty/i);
 
@@ -759,13 +768,13 @@ moduleFor(
 
 moduleFor(
   'object.addObserver()',
-  class extends AbstractTestCase {
+  class extends ObservableTestCase {
     beforeEach() {
-      ObjectC = ObservableObject.create({
-        objectE: ObservableObject.create({
-          propertyVal: 'chainedProperty',
-        }),
-
+      objectE = ObservableObject.create({
+        propertyVal: 'chainedProperty',
+      });
+      objectC = ObservableObject.create({
+        objectE,
         normal: 'value',
         normal1: 'zeroValue',
         normal2: 'dependentValue',
@@ -786,38 +795,39 @@ moduleFor(
     }
 
     async ['@test should register an observer for a property'](assert) {
-      ObjectC.addObserver('normal', ObjectC, 'action');
-      ObjectC.set('normal', 'newValue');
+      objectC.addObserver('normal', objectC, 'action');
+      objectC.set('normal', 'newValue');
 
       await runLoopSettled();
-      assert.equal(ObjectC.normal1, 'newZeroValue');
+      assert.equal(objectC.normal1, 'newZeroValue');
     }
 
     async ['@test should register an observer for a property - Special case of chained property'](
       assert
     ) {
-      ObjectC.addObserver('objectE.propertyVal', ObjectC, 'chainedObserver');
-      ObjectC.objectE.set('propertyVal', 'chainedPropertyValue');
+      objectC.addObserver('objectE.propertyVal', objectC, 'chainedObserver');
+      objectC.objectE.set('propertyVal', 'chainedPropertyValue');
       await runLoopSettled();
 
-      assert.equal('chainedPropertyObserved', ObjectC.normal2);
-      ObjectC.normal2 = 'dependentValue';
-      ObjectC.set('objectE', '');
+      assert.equal('chainedPropertyObserved', objectC.normal2);
+      objectC.normal2 = 'dependentValue';
+      objectC.set('objectE', '');
       await runLoopSettled();
 
-      assert.equal('chainedPropertyObserved', ObjectC.normal2);
+      assert.equal('chainedPropertyObserved', objectC.normal2);
     }
   }
 );
 
 moduleFor(
   'object.removeObserver()',
-  class extends AbstractTestCase {
+  class extends ObservableTestCase {
     beforeEach() {
-      ObjectD = ObservableObject.create({
-        objectF: ObservableObject.create({
-          propertyVal: 'chainedProperty',
-        }),
+      objectF = ObservableObject.create({
+        propertyVal: 'chainedProperty',
+      });
+      objectD = ObservableObject.create({
+        objectF,
 
         normal: 'value',
         normal1: 'zeroValue',
@@ -852,39 +862,39 @@ moduleFor(
     }
 
     async ['@test should unregister an observer for a property'](assert) {
-      ObjectD.addObserver('normal', ObjectD, 'addAction');
-      ObjectD.set('normal', 'newValue');
+      objectD.addObserver('normal', objectD, 'addAction');
+      objectD.set('normal', 'newValue');
       await runLoopSettled();
 
-      assert.equal(ObjectD.normal1, 'newZeroValue');
+      assert.equal(objectD.normal1, 'newZeroValue');
 
-      ObjectD.set('normal1', 'zeroValue');
+      objectD.set('normal1', 'zeroValue');
       await runLoopSettled();
 
-      ObjectD.removeObserver('normal', ObjectD, 'addAction');
-      ObjectD.set('normal', 'newValue');
-      assert.equal(ObjectD.normal1, 'zeroValue');
+      objectD.removeObserver('normal', objectD, 'addAction');
+      objectD.set('normal', 'newValue');
+      assert.equal(objectD.normal1, 'zeroValue');
     }
 
     async ["@test should unregister an observer for a property - special case when key has a '.' in it."](
       assert
     ) {
-      ObjectD.addObserver('objectF.propertyVal', ObjectD, 'removeChainedObserver');
-      ObjectD.objectF.set('propertyVal', 'chainedPropertyValue');
+      objectD.addObserver('objectF.propertyVal', objectD, 'removeChainedObserver');
+      objectD.objectF.set('propertyVal', 'chainedPropertyValue');
       await runLoopSettled();
 
-      ObjectD.removeObserver('objectF.propertyVal', ObjectD, 'removeChainedObserver');
-      ObjectD.normal2 = 'dependentValue';
+      objectD.removeObserver('objectF.propertyVal', objectD, 'removeChainedObserver');
+      objectD.normal2 = 'dependentValue';
 
-      ObjectD.objectF.set('propertyVal', 'removedPropertyValue');
+      objectD.objectF.set('propertyVal', 'removedPropertyValue');
       await runLoopSettled();
 
-      assert.equal('dependentValue', ObjectD.normal2);
+      assert.equal('dependentValue', objectD.normal2);
 
-      ObjectD.set('objectF', '');
+      objectD.set('objectF', '');
       await runLoopSettled();
 
-      assert.equal('dependentValue', ObjectD.normal2);
+      assert.equal('dependentValue', objectD.normal2);
     }
 
     async ['@test removing an observer inside of an observer shouldn’t cause any problems'](
@@ -894,11 +904,11 @@ moduleFor(
       // observers in the middle of observer notification.
       let encounteredError = false;
       try {
-        ObjectD.addObserver('observableValue', null, 'observer1');
-        ObjectD.addObserver('observableValue', null, 'observer2');
-        ObjectD.addObserver('observableValue', null, 'observer3');
+        objectD.addObserver('observableValue', null, 'observer1');
+        objectD.addObserver('observableValue', null, 'observer2');
+        objectD.addObserver('observableValue', null, 'observer3');
 
-        ObjectD.set('observableValue', 'hi world');
+        objectD.set('observableValue', 'hi world');
 
         await runLoopSettled();
       } catch (e) {

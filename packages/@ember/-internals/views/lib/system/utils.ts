@@ -9,20 +9,20 @@ import { Dict, Option } from '@glimmer/interfaces';
 @module ember
 */
 
-export function isSimpleClick(event: MouseEvent) {
+export function isSimpleClick(event: MouseEvent): boolean {
   let modifier = event.shiftKey || event.metaKey || event.altKey || event.ctrlKey;
   let secondaryClick = event.which > 1; // IE9 may return undefined
 
   return !modifier && !secondaryClick;
 }
 
-export function constructStyleDeprecationMessage(affectedStyle: string) {
+export function constructStyleDeprecationMessage(affectedStyle: string): string {
   return (
     '' +
     'Binding style attributes may introduce cross-site scripting vulnerabilities; ' +
     'please ensure that values being bound are properly escaped. For more information, ' +
     'including how to disable this warning, see ' +
-    'https://emberjs.com/deprecations/v1.x/#toc_binding-style-attributes. ' +
+    'https://deprecations.emberjs.com/v1.x/#toc_binding-style-attributes. ' +
     'Style affected: "' +
     affectedStyle +
     '"'
@@ -48,7 +48,7 @@ export function getRootViews(owner: Owner): View[] {
 
   let rootViews: View[] = [];
 
-  Object.keys(registry).forEach(id => {
+  Object.keys(registry).forEach((id) => {
     let view = registry[id];
 
     if (view.parentView === null) {
@@ -116,7 +116,7 @@ const CHILD_VIEW_IDS: WeakMap<View, Set<string>> = new WeakMap();
   @method getChildViews
   @param {Ember.View} view
 */
-export function getChildViews(view: View) {
+export function getChildViews(view: View): View[] {
   let owner = getOwner(view);
   let registry = owner.lookup<Dict<View>>('-view-registry:main')!;
   return collectChildViews(view, registry);
@@ -142,7 +142,7 @@ export function collectChildViews(view: View, registry: Dict<View>): View[] {
   let childViews = CHILD_VIEW_IDS.get(view);
 
   if (childViews !== undefined) {
-    childViews.forEach(id => {
+    childViews.forEach((id) => {
       let view = registry[id];
       if (view && !view.isDestroying && !view.isDestroyed) {
         views.push(view);
@@ -171,8 +171,8 @@ export function getViewRange(view: View): Range {
   let bounds = getViewBounds(view);
 
   let range = document.createRange();
-  range.setStartBefore(bounds.firstNode as Node);
-  range.setEndAfter(bounds.lastNode as Node);
+  range.setStartBefore((bounds.firstNode as unknown) as Node);
+  range.setEndAfter((bounds.lastNode as unknown) as Node);
 
   return range;
 }
@@ -227,12 +227,12 @@ export const elMatches: typeof Element.prototype.matches | undefined =
       Element.prototype['webkitMatchesSelector']
     : undefined;
 
-export function matches(el: Element, selector: string) {
+export function matches(el: Element, selector: string): boolean {
   assert('cannot call `matches` in fastboot mode', elMatches !== undefined);
   return elMatches!.call(el, selector);
 }
 
-export function contains(a: Node, b: Node) {
+export function contains(a: Node, b: Node): boolean {
   if (a.contains !== undefined) {
     return a.contains(b);
   }

@@ -2,10 +2,11 @@
 @module ember
 */
 import { QueryParams } from '@ember/-internals/routing';
-import { assert } from '@ember/debug';
-import { assign } from '@ember/polyfills';
-import { Arguments, CapturedArguments, VM } from '@glimmer/runtime';
-import { InternalHelperReference } from '../utils/references';
+import { assert, deprecate } from '@ember/debug';
+import { CapturedArguments } from '@glimmer/interfaces';
+import { createComputeRef } from '@glimmer/reference';
+import { reifyNamed } from '@glimmer/runtime';
+import { internalHelper } from './internal-helper';
 
 /**
   This is a helper to be used in conjunction with the link-to helper.
@@ -28,16 +29,27 @@ import { InternalHelperReference } from '../utils/references';
   @return {Object} A `QueryParams` object for `{{link-to}}`
   @public
 */
-function queryParams({ positional, named }: CapturedArguments) {
-  // tslint:disable-next-line:max-line-length
-  assert(
-    "The `query-params` helper only accepts hash parameters, e.g. (query-params queryParamPropertyName='foo') as opposed to just (query-params 'foo')",
-    positional.value().length === 0
-  );
+export default internalHelper(({ positional, named }: CapturedArguments) => {
+  return createComputeRef(() => {
+    assert(
+      "The `query-params` helper only accepts named arguments, e.g. (query-params queryParamPropertyName='foo') as opposed to (query-params 'foo')",
+      positional.length === 0
+    );
 
-  return new QueryParams(assign({}, named.value() as any));
-}
+    deprecate(
+      'The `query-params` helper is deprecated. Invoke `<LinkTo>` with the `@query` named argument and the `hash` helper instead.',
+      false,
+      {
+        id: 'ember-glimmer.link-to.positional-arguments',
+        until: '4.0.0',
+        for: 'ember-source',
+        url: 'https://deprecations.emberjs.com/v3.x#toc_ember-glimmer-link-to-positional-arguments',
+        since: {
+          enabled: '3.26.0-beta.1',
+        },
+      }
+    );
 
-export default function(_vm: VM, args: Arguments) {
-  return new InternalHelperReference(queryParams, args.capture());
-}
+    return new QueryParams(Object.assign({}, reifyNamed(named) as any));
+  });
+});

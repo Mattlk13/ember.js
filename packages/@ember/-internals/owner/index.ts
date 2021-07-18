@@ -1,3 +1,5 @@
+import { getOwner as glimmerGetOwner, setOwner as glimmerSetOwner } from '@glimmer/owner';
+
 /**
 @module @ember/application
 */
@@ -5,8 +7,6 @@
 export interface LookupOptions {
   singleton?: boolean;
   instantiate?: boolean;
-  source?: string;
-  namespace?: string;
 }
 
 export interface FactoryClass {
@@ -15,6 +15,7 @@ export interface FactoryClass {
 
 export interface Factory<T, C extends FactoryClass | object = FactoryClass> {
   class?: C;
+  name?: string;
   fullName?: string;
   normalizedName?: string;
   create(props?: { [prop: string]: any }): T;
@@ -25,20 +26,22 @@ export interface EngineInstanceOptions {
   routable: boolean;
 }
 
+import EngineInstance from '@ember/engine/instance';
 export interface Owner {
   lookup<T>(fullName: string, options?: LookupOptions): T | undefined;
   factoryFor<T, C>(fullName: string, options?: LookupOptions): Factory<T, C> | undefined;
   factoryFor(fullName: string, options?: LookupOptions): Factory<any, any> | undefined;
-  buildChildEngineInstance<T>(name: string, options?: EngineInstanceOptions): T;
+  buildChildEngineInstance(name: string, options?: EngineInstanceOptions): EngineInstance;
   register<T, C>(fullName: string, factory: Factory<T, C>, options?: object): void;
   hasRegistration(name: string, options?: LookupOptions): boolean;
   mountPoint?: string;
   routable?: boolean;
 }
 
-import { symbol } from '@ember/-internals/utils';
+import { enumerableSymbol } from '@ember/-internals/utils';
+import { deprecate } from '@ember/debug';
 
-export const OWNER = symbol('OWNER');
+export const LEGACY_OWNER: unique symbol = enumerableSymbol('LEGACY_OWNER') as any;
 
 /**
   Framework objects in an Ember application (components, services, routes, etc.)
@@ -51,28 +54,29 @@ export const OWNER = symbol('OWNER');
   into the owner.
 
   For example, this component dynamically looks up a service based on the
-  `audioType` passed as an attribute:
+  `audioType` passed as an argument:
 
   ```app/components/play-audio.js
-  import Component from '@ember/component';
-  import { computed } from '@ember/object';
+  import Component from '@glimmer/component';
+  import { action } from '@ember/object';
   import { getOwner } from '@ember/application';
 
   // Usage:
   //
-  //   {{play-audio audioType=model.audioType audioFile=model.file}}
+  //   <PlayAudio @audioType={{@model.audioType}} @audioFile={{@model.file}}/>
   //
-  export default Component.extend({
-    audioService: computed('audioType', function() {
+  export default class extends Component {
+    get audioService() {
       let owner = getOwner(this);
-      return owner.lookup(`service:${this.get('audioType')}`);
-    }),
-
-    click() {
-      let player = this.get('audioService');
-      player.play(this.get('audioFile'));
+      return owner.lookup(`service:${this.args.audioType}`);
     }
-  });
+
+    @action
+    onPlay() {
+      let player = this.audioService;
+      player.play(this.args.audioFile);
+    }
+  }
   ```
 
   @method getOwner
@@ -84,7 +88,26 @@ export const OWNER = symbol('OWNER');
   @public
 */
 export function getOwner(object: any): Owner {
-  return object[OWNER];
+  let owner = glimmerGetOwner(object) as Owner;
+
+  if (owner === undefined) {
+    owner = object[LEGACY_OWNER];
+
+    deprecate(
+      `You accessed the owner using \`getOwner\` on an object, but it was not set on that object with \`setOwner\`. You must use \`setOwner\` to set the owner on all objects. You cannot use Object.assign().`,
+      owner === undefined,
+      {
+        id: 'owner.legacy-owner-injection',
+        until: '3.25.0',
+        for: 'ember-source',
+        since: {
+          enabled: '3.22.0',
+        },
+      }
+    );
+  }
+
+  return owner;
 }
 
 /**
@@ -100,5 +123,6 @@ export function getOwner(object: any): Owner {
   @public
 */
 export function setOwner(object: any, owner: Owner): void {
-  object[OWNER] = owner;
+  glimmerSetOwner(object, owner);
+  object[LEGACY_OWNER] = owner;
 }

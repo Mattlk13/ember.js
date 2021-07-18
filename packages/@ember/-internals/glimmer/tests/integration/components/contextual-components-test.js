@@ -1,6 +1,6 @@
+import { DEBUG } from '@glimmer/env';
 import { moduleFor, RenderingTestCase, applyMixins, strip, runTask } from 'internal-test-helpers';
 
-import { assign } from '@ember/polyfills';
 import { isEmpty } from '@ember/-internals/metal';
 import { A as emberA } from '@ember/-internals/runtime';
 
@@ -30,7 +30,7 @@ moduleFor(
         ComponentClass: Component.extend().reopenClass({
           positionalParams: ['name'],
         }),
-        template: '{{greeting}} {{name}}',
+        template: '{{this.greeting}} {{this.name}}',
       });
 
       this.render(strip`
@@ -48,7 +48,7 @@ moduleFor(
         ComponentClass: Component.extend().reopenClass({
           positionalParams: 'params',
         }),
-        template: '{{#each params as |p|}}{{p}}{{/each}}',
+        template: '{{#each this.params as |p|}}{{p}}{{/each}}',
       });
 
       this.render('{{component (component "-looked-up" this.model.greeting this.model.name)}}', {
@@ -83,7 +83,7 @@ moduleFor(
         ComponentClass: Component.extend().reopenClass({
           positionalParams: 'params',
         }),
-        template: '{{#each params as |p|}}{{p}}{{/each}}',
+        template: '{{#each this.params as |p|}}{{p}}{{/each}}',
       });
 
       this.render(
@@ -120,7 +120,7 @@ moduleFor(
         ComponentClass: Component.extend().reopenClass({
           positionalParams: 'params',
         }),
-        template: '{{#each params as |p|}}{{p}}{{/each}}',
+        template: '{{#each this.params as |p|}}{{p}}{{/each}}',
       });
 
       this.render(
@@ -157,7 +157,7 @@ moduleFor(
         ComponentClass: Component.extend().reopenClass({
           positionalParams: 'params',
         }),
-        template: '{{#each params as |p|}}{{p}}{{/each}}',
+        template: '{{#each this.params as |p|}}{{p}}{{/each}}',
       });
 
       this.render(
@@ -194,7 +194,7 @@ moduleFor(
         ComponentClass: Component.extend().reopenClass({
           positionalParams: ['name'],
         }),
-        template: '{{greeting}} {{name}}',
+        template: '{{this.greeting}} {{this.name}}',
       });
 
       this.render(strip`
@@ -240,7 +240,7 @@ moduleFor(
 
     ['@test updates when curried hash argument is bound']() {
       this.registerComponent('-looked-up', {
-        template: '{{greeting}}',
+        template: '{{this.greeting}}',
       });
 
       this.render(`{{component (component "-looked-up" greeting=this.model.greeting)}}`, {
@@ -266,14 +266,14 @@ moduleFor(
 
     ['@test updates when curried hash arguments is bound in block form']() {
       this.registerComponent('-looked-up', {
-        template: '{{greeting}}',
+        template: '{{this.greeting}}',
       });
 
       this.render(
         strip`
-      {{#with (hash comp=(component "-looked-up" greeting=this.model.greeting)) as |my|}}
+      {{#let (hash comp=(component "-looked-up" greeting=this.model.greeting)) as |my|}}
         {{#my.comp}}{{/my.comp}}
-      {{/with}}`,
+      {{/let}}`,
         {
           model: {
             greeting: 'Hodi',
@@ -301,7 +301,7 @@ moduleFor(
         ComponentClass: Component.extend().reopenClass({
           positionalParams: ['name', 'age'],
         }),
-        template: '{{name}} {{age}}',
+        template: '{{this.name}} {{this.age}}',
       });
 
       this.render(
@@ -320,7 +320,7 @@ moduleFor(
         ComponentClass: Component.extend().reopenClass({
           positionalParams: ['greeting', 'name', 'age'],
         }),
-        template: '{{greeting}} {{name}} {{age}}',
+        template: '{{this.greeting}} {{this.name}} {{this.age}}',
       });
 
       this.render('{{component (component (component "-looked-up" "Hi") "Max") 9}}');
@@ -334,16 +334,16 @@ moduleFor(
 
     ['@test nested components overwrite hash parameters']() {
       this.registerComponent('-looked-up', {
-        template: '{{greeting}} {{name}} {{age}}',
+        template: '{{this.greeting}} {{this.name}} {{this.age}}',
       });
 
       this.render(
         strip`
-      {{#with (component "-looked-up" greeting="Hola" name="Dolores" age=33) as |first|}}
-        {{#with (component first greeting="Hej" name="Sigmundur") as |second|}}
+      {{#let (component "-looked-up" greeting="Hola" name="Dolores" age=33) as |first|}}
+        {{#let (component first greeting="Hej" name="Sigmundur") as |second|}}
           {{component second greeting=this.model.greeting}}
-        {{/with}}
-      {{/with}}`,
+        {{/let}}
+      {{/let}}`,
         {
           model: {
             greeting: 'Hodi',
@@ -371,14 +371,14 @@ moduleFor(
         ComponentClass: Component.extend().reopenClass({
           positionalParams: ['comp'],
         }),
-        template: '{{component comp "Inner"}}',
+        template: '{{component this.comp "Inner"}}',
       });
 
       this.registerComponent('-looked-up', {
         ComponentClass: Component.extend().reopenClass({
           positionalParams: ['name', 'age'],
         }),
-        template: '{{name}} {{age}}',
+        template: '{{this.name}} {{this.age}}',
       });
 
       this.render(
@@ -420,11 +420,11 @@ moduleFor(
         ComponentClass: Component.extend().reopenClass({
           positionalParams: ['comp'],
         }),
-        template: '{{component comp name="Inner"}}',
+        template: '{{component this.comp name="Inner"}}',
       });
 
       this.registerComponent('-looked-up', {
-        template: '{{name}} {{age}}',
+        template: '{{this.name}} {{this.age}}',
       });
 
       this.render(
@@ -468,7 +468,7 @@ moduleFor(
         ComponentClass: Component.extend().reopenClass({
           positionalParams: ['name'],
         }),
-        template: '{{greeting}} {{name}}',
+        template: '{{this.greeting}} {{this.name}}',
       });
 
       this.render('{{component (component "-looked-up" this.model.name greeting="Hodi")}}', {
@@ -493,9 +493,9 @@ moduleFor(
     }
 
     ['@test component with dynamic component name resolving to undefined, then an existing component']() {
-      this.registerComponent('foo-bar', { template: 'hello {{name}}' });
+      this.registerComponent('foo-bar', { template: 'hello {{this.name}}' });
 
-      this.render('{{component (component componentName name=name)}}', {
+      this.render('{{component (component this.componentName name=this.name)}}', {
         componentName: undefined,
         name: 'Alex',
       });
@@ -516,9 +516,9 @@ moduleFor(
     }
 
     ['@test component with dynamic component name resolving to a component, then undefined']() {
-      this.registerComponent('foo-bar', { template: 'hello {{name}}' });
+      this.registerComponent('foo-bar', { template: 'hello {{this.name}}' });
 
-      this.render('{{component (component componentName name=name)}}', {
+      this.render('{{component (component this.componentName name=this.name)}}', {
         componentName: 'foo-bar',
         name: 'Alex',
       });
@@ -539,9 +539,9 @@ moduleFor(
     }
 
     ['@test component with dynamic component name resolving to null, then an existing component']() {
-      this.registerComponent('foo-bar', { template: 'hello {{name}}' });
+      this.registerComponent('foo-bar', { template: 'hello {{this.name}}' });
 
-      this.render('{{component (component componentName name=name)}}', {
+      this.render('{{component (component this.componentName name=this.name)}}', {
         componentName: null,
         name: 'Alex',
       });
@@ -562,9 +562,9 @@ moduleFor(
     }
 
     ['@test component with dynamic component name resolving to a component, then null']() {
-      this.registerComponent('foo-bar', { template: 'hello {{name}}' });
+      this.registerComponent('foo-bar', { template: 'hello {{this.name}}' });
 
-      this.render('{{component (component componentName name=name)}}', {
+      this.render('{{component (component this.componentName name=this.name)}}', {
         componentName: 'foo-bar',
         name: 'Alex',
       });
@@ -584,15 +584,25 @@ moduleFor(
       this.assertText('hello Alex');
     }
 
-    ['@test raises an assertion when component path is not a component name (static)']() {
-      expectAssertion(() => {
+    ['@test raises an assertion when component path is not a component name (static)'](assert) {
+      if (!DEBUG) {
+        assert.expect(0);
+        return;
+      }
+
+      assert.throws(() => {
         this.render('{{component (component "not-a-component")}}');
       }, 'Could not find component named "not-a-component" (no component or template with that name was found)');
     }
 
-    ['@test raises an assertion when component path is not a component name (dynamic)']() {
-      expectAssertion(() => {
-        this.render('{{component (component compName)}}', {
+    ['@test raises an assertion when component path is not a component name (dynamic)'](assert) {
+      if (!DEBUG) {
+        assert.expect(0);
+        return;
+      }
+
+      assert.throws(() => {
+        this.render('{{component (component this.compName)}}', {
           compName: 'not-a-component',
         });
       }, 'Could not find component named "not-a-component" (no component or template with that name was found)');
@@ -605,9 +615,9 @@ moduleFor(
       });
 
       this.render(strip`
-      {{#with (hash lookedup=(component "-looked-up")) as |object|}}
+      {{#let (hash lookedup=(component "-looked-up")) as |object|}}
         {{object.lookedup}}
-      {{/with}}`);
+      {{/let}}`);
 
       this.assertText(expectedText);
 
@@ -619,14 +629,14 @@ moduleFor(
     ['@test renders with dot path and attr']() {
       let expectedText = 'Hodi';
       this.registerComponent('-looked-up', {
-        template: '{{expectedText}}',
+        template: '{{this.expectedText}}',
       });
 
       this.render(
         strip`
-      {{#with (hash lookedup=(component "-looked-up")) as |object|}}
+      {{#let (hash lookedup=(component "-looked-up")) as |object|}}
         {{object.lookedup expectedText=this.model.expectedText}}
-      {{/with}}`,
+      {{/let}}`,
         {
           model: {
             expectedText,
@@ -652,14 +662,14 @@ moduleFor(
     ['@test renders with dot path and curried over attr']() {
       let expectedText = 'Hodi';
       this.registerComponent('-looked-up', {
-        template: '{{expectedText}}',
+        template: '{{this.expectedText}}',
       });
 
       this.render(
         strip`
-      {{#with (hash lookedup=(component "-looked-up" expectedText=this.model.expectedText)) as |object|}}
+      {{#let (hash lookedup=(component "-looked-up" expectedText=this.model.expectedText)) as |object|}}
         {{object.lookedup}}
-      {{/with}}`,
+      {{/let}}`,
         {
           model: {
             expectedText,
@@ -687,16 +697,16 @@ moduleFor(
         ComponentClass: Component.extend().reopenClass({
           positionalParams: 'params',
         }),
-        template: '{{params}}',
+        template: '{{this.params}}',
       });
 
       let expectedText = 'Hodi';
 
       this.render(
         strip`
-      {{#with (hash lookedup=(component "-looked-up")) as |object|}}
+      {{#let (hash lookedup=(component "-looked-up")) as |object|}}
         {{object.lookedup this.model.expectedText "Hola"}}
-      {{/with}}`,
+      {{/let}}`,
         {
           model: {
             expectedText,
@@ -737,9 +747,9 @@ moduleFor(
 
       this.render(
         strip`
-      {{#with (hash my-component=(component 'my-component' first)) as |c|}}
+      {{#let (hash my-component=(component 'my-component' this.first)) as |c|}}
         {{c.my-component}}
-      {{/with}}`,
+      {{/let}}`,
         { first: 'first' }
       );
 
@@ -753,12 +763,12 @@ moduleFor(
             this.set('myProp', this.getAttr('my-parent-attr'));
           },
         }),
-        template: '<span id="nested-prop">{{myProp}}</span>',
+        template: '<span id="nested-prop">{{this.myProp}}</span>',
       });
 
       this.registerComponent('my-component', {
         template:
-          '{{yield (hash my-nested-component=(component "my-nested-component" my-parent-attr=my-attr))}}',
+          '{{yield (hash my-nested-component=(component "my-nested-component" my-parent-attr=this.my-attr))}}',
       });
 
       this.registerComponent('my-action-component', {
@@ -770,7 +780,7 @@ moduleFor(
           },
         }),
         template: strip`
-        {{#my-component my-attr=myProp as |api|}}
+        {{#my-component my-attr=this.myProp as |api|}}
           {{api.my-nested-component}}
         {{/my-component}}
         <br>
@@ -810,7 +820,7 @@ moduleFor(
       });
 
       this.registerComponent('select-box-option', {
-        template: '{{label}}',
+        template: '{{this.label}}',
       });
 
       this.render(strip`
@@ -835,7 +845,7 @@ moduleFor(
           positionalParams: ['val'],
         }),
         template: strip`
-        <button {{action (action (mut val) 10)}} class="my-button">
+        <button {{action (action (mut this.val) 10)}} class="my-button">
           Change to 10
         </button>`,
       });
@@ -889,7 +899,7 @@ moduleFor(
           },
         }),
         template: strip`
-        message: {{message}}{{inner-component message=message}}
+        message: {{this.message}}{{inner-component message=this.message}}
         <button onclick={{action "change"}} />`,
       });
 
@@ -930,14 +940,14 @@ moduleFor(
           },
           isOpen: undefined,
         }),
-        template: '{{if isOpen "open" "closed"}}',
+        template: '{{if this.isOpen "open" "closed"}}',
       });
 
       this.render(
         strip`
-      {{#with (hash ctxCmp=(component "my-comp" isOpen=isOpen)) as |thing|}}
+      {{#let (hash ctxCmp=(component "my-comp" isOpen=this.isOpen)) as |thing|}}
         {{#thing.ctxCmp}}This is a contextual component{{/thing.ctxCmp}}
-      {{/with}}
+      {{/let}}
     `,
         {
           isOpen: true,
@@ -994,14 +1004,14 @@ moduleFor(
           },
           isOpen: undefined,
         }),
-        template: '{{if isOpen "open" "closed"}}',
+        template: '{{if this.isOpen "open" "closed"}}',
       });
 
       this.render(
         strip`
-      {{#with (hash ctxCmp=(component compName isOpen=isOpen)) as |thing|}}
+      {{#let (hash ctxCmp=(component this.compName isOpen=this.isOpen)) as |thing|}}
         {{#thing.ctxCmp}}This is a contextual component{{/thing.ctxCmp}}
-      {{/with}}
+      {{/let}}
     `,
         {
           compName: 'my-comp',
@@ -1059,7 +1069,7 @@ moduleFor(
           },
           isOpen: undefined,
         }),
-        template: 'my-comp: {{if isOpen "open" "closed"}}',
+        template: 'my-comp: {{if this.isOpen "open" "closed"}}',
       });
 
       this.registerComponent('your-comp', {
@@ -1072,14 +1082,14 @@ moduleFor(
           },
           isOpen: undefined,
         }),
-        template: 'your-comp: {{if isOpen "open" "closed"}}',
+        template: 'your-comp: {{if this.isOpen "open" "closed"}}',
       });
 
       this.render(
         strip`
-      {{#with (hash ctxCmp=(component compName isOpen=isOpen)) as |thing|}}
+      {{#let (hash ctxCmp=(component this.compName isOpen=this.isOpen)) as |thing|}}
         {{#thing.ctxCmp}}This is a contextual component{{/thing.ctxCmp}}
-      {{/with}}
+      {{/let}}
     `,
         {
           compName: 'my-comp',
@@ -1144,10 +1154,10 @@ moduleFor(
         ComponentClass: Component.extend().reopenClass({
           positionalParams: 'params',
         }),
-        template: '{{#each params as |p|}}{{p}}{{/each}}',
+        template: '{{#each this.params as |p|}}{{p}}{{/each}}',
       });
 
-      this.render('{{component (component "my-link") params=allParams}}', {
+      this.render('{{component (component "my-link") params=this.allParams}}', {
         allParams: emberA(['a', 'b']),
       });
 
@@ -1183,11 +1193,11 @@ moduleFor(
         ComponentClass: Component.extend().reopenClass({
           positionalParams: 'params',
         }),
-        template: '{{#each params as |p|}}{{p}}{{/each}}',
+        template: '{{#each this.params as |p|}}{{p}}{{/each}}',
       });
 
       this.render(
-        '{{#with (hash link=(component "my-link")) as |c|}}{{c.link params=allParams}}{{/with}}',
+        '{{#let (hash link=(component "my-link")) as |c|}}{{c.link params=this.allParams}}{{/let}}',
         {
           allParams: emberA(['a', 'b']),
         }
@@ -1221,7 +1231,7 @@ moduleFor(
     }
 
     ['@test it can invoke input component']() {
-      this.render('{{component (component "input" type="text" value=value)}}', {
+      this.render('{{component (component "input" type="text" value=this.value)}}', {
         value: 'foo',
       });
 
@@ -1247,7 +1257,7 @@ moduleFor(
     }
 
     ['@test it can invoke textarea component']() {
-      this.render('{{component (component "textarea" value=value)}}', {
+      this.render('{{component (component "textarea" value=this.value)}}', {
         value: 'foo',
       });
 
@@ -1288,13 +1298,13 @@ moduleFor(
     }
 
     ['@test GH#17121 local variable should win over helper (with arguments)']() {
-      this.registerHelper('foo', params => `foo helper: ${params.join(' ')}`);
+      this.registerHelper('foo', (params) => `foo helper: ${params.join(' ')}`);
 
       this.registerComponent('foo-bar', {
         ComponentClass: Component.extend().reopenClass({
           positionalParams: 'params',
         }),
-        template: 'foo-bar component:{{#each params as |param|}} {{param}}{{/each}}',
+        template: 'foo-bar component:{{#each this.params as |param|}} {{param}}{{/each}}',
       });
 
       this.render(strip`
@@ -1306,20 +1316,6 @@ moduleFor(
       this.assertText('foo-bar component: 1 2 3');
 
       this.assertStableRerender();
-    }
-
-    ['@test GH#17121 implicit component invocations should not perform string lookup']() {
-      this.registerComponent('foo-bar', { template: 'foo-bar component' });
-
-      expectAssertion(
-        () =>
-          this.render(strip`
-          {{#let 'foo-bar' as |foo|}}
-            {{foo 1 2 3}}
-          {{/let}}
-        `),
-        "expected `foo` to be a contextual component but found a string. Did you mean `(component foo)`? ('-top-level' @ L1:C29) "
-      );
     }
 
     ['@test RFC#311 invoking named args (without arguments)']() {
@@ -1340,7 +1336,7 @@ moduleFor(
         ComponentClass: Component.extend().reopenClass({
           positionalParams: 'params',
         }),
-        template: 'inner:{{#each params as |param|}} {{param}}{{/each}}',
+        template: 'inner:{{#each this.params as |param|}} {{param}}{{/each}}',
       });
 
       this.render('{{x-outer inner=(component "x-inner")}}');
@@ -1360,6 +1356,83 @@ moduleFor(
 
       this.assertStableRerender();
     }
+
+    ['@test GH#18732 hasBlock works within a yielded curried component invoked within mustaches']() {
+      expectDeprecation(
+        `\`hasBlock\` is deprecated. Use \`has-block\` instead. ('my-app/templates/components/component-with-has-block.hbs' @ L1:C5) `
+      );
+      this.registerComponent('component-with-has-block', {
+        ComponentClass: Component.extend(),
+        template: '<div>{{hasBlock}}</div>',
+      });
+
+      this.registerComponent('yielding-component', {
+        ComponentClass: Component.extend(),
+        template: '{{yield (component "component-with-has-block")}}',
+      });
+
+      this.registerComponent('test-component', {
+        ComponentClass: Component.extend(),
+        template:
+          '{{#yielding-component as |componentWithHasBlock|}}{{componentWithHasBlock}}{{/yielding-component}}',
+      });
+
+      this.render('{{test-component}}');
+
+      this.assertText('false');
+    }
+
+    ['@test GH#18732 has-block works within a yielded curried component invoked with angle bracket invocation (falsy)']() {
+      expectDeprecation(
+        `\`hasBlock\` is deprecated. Use \`has-block\` instead. ('my-app/templates/components/component-with-has-block.hbs' @ L1:C5) `
+      );
+
+      this.registerComponent('component-with-has-block', {
+        ComponentClass: Component.extend(),
+        template: '<div>{{hasBlock}}</div>',
+      });
+
+      this.registerComponent('yielding-component', {
+        ComponentClass: Component.extend(),
+        template: '{{yield (component "component-with-has-block")}}',
+      });
+
+      this.registerComponent('test-component', {
+        ComponentClass: Component.extend(),
+        template:
+          '{{#yielding-component as |componentWithHasBlock|}}<componentWithHasBlock/>{{/yielding-component}}',
+      });
+
+      this.render('{{test-component}}');
+
+      this.assertText('false');
+    }
+
+    ['@test GH#18732 has-block works within a yielded curried component invoked with angle bracket invocation (truthy)']() {
+      expectDeprecation(
+        `\`hasBlock\` is deprecated. Use \`has-block\` instead. ('my-app/templates/components/component-with-has-block.hbs' @ L1:C5) `
+      );
+
+      this.registerComponent('component-with-has-block', {
+        ComponentClass: Component.extend(),
+        template: '<div>{{hasBlock}}</div>',
+      });
+
+      this.registerComponent('yielding-component', {
+        ComponentClass: Component.extend(),
+        template: '{{yield (component "component-with-has-block")}}',
+      });
+
+      this.registerComponent('test-component', {
+        ComponentClass: Component.extend(),
+        template:
+          '{{#yielding-component as |componentWithHasBlock|}}<componentWithHasBlock></componentWithHasBlock>{{/yielding-component}}',
+      });
+
+      this.render('{{test-component}}');
+
+      this.assertText('true');
+    }
   }
 );
 
@@ -1367,7 +1440,7 @@ class ContextualComponentMutableParamsTest extends RenderingTestCase {
   render(templateStr, context = {}) {
     super.render(
       `${templateStr}<span class="value">{{this.model.val2}}</span>`,
-      assign(context, { model: { val2: 8 } })
+      Object.assign(context, { model: { val2: 8 } })
     );
   }
 }
@@ -1385,7 +1458,7 @@ class MutableParamTestGenerator {
             positionalParams: ['val'],
           }),
           template: strip`
-          <button {{action (action (mut val) 10)}} class="my-button">
+          <button {{action (action (mut this.val) 10)}} class="my-button">
             Change to 10
           </button>`,
         });
@@ -1427,7 +1500,7 @@ applyMixins(
           ComponentClass: Component.extend().reopenClass({
             positionalParams: ['components'],
           }),
-          template: '{{component components.comp}}',
+          template: '{{component this.components.comp}}',
         });
 
         this.render('{{my-comp (hash comp=(component "change-button" this.model.val2))}}');
@@ -1438,7 +1511,7 @@ applyMixins(
       title: 'hash value',
       setup() {
         this.registerComponent('my-comp', {
-          template: '{{component component}}',
+          template: '{{component this.component}}',
         });
 
         this.render('{{my-comp component=(component "change-button" val=this.model.val2)}}');
@@ -1449,7 +1522,7 @@ applyMixins(
       title: 'nested hash value',
       setup() {
         this.registerComponent('my-comp', {
-          template: '{{component components.button}}',
+          template: '{{component this.components.button}}',
         });
 
         this.render(

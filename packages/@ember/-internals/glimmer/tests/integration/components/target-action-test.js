@@ -6,7 +6,6 @@ import {
   runTask,
 } from 'internal-test-helpers';
 
-import { assign } from '@ember/polyfills';
 import { set, Mixin } from '@ember/-internals/metal';
 import Controller from '@ember/controller';
 import { Object as EmberObject } from '@ember/-internals/runtime';
@@ -45,7 +44,7 @@ moduleFor(
 
     renderDelegate(template = '{{action-delegate}}', context = {}) {
       let root = this;
-      context = assign(context, {
+      context = Object.assign(context, {
         send(actionName, ...args) {
           root.sendCount++;
           root.actionCounts[actionName] = root.actionCounts[actionName] || 0;
@@ -116,7 +115,7 @@ moduleFor(
       this.renderDelegate();
       expectSendActionDeprecation(() => {
         runTask(() => {
-          set(this.delegate, 'action', actualArgument => {
+          set(this.delegate, 'action', (actualArgument) => {
             this.assert.deepEqual(argument, actualArgument, 'argument is passed');
           });
           this.delegate.sendAction('action', argument);
@@ -126,7 +125,7 @@ moduleFor(
 
     // TODO consolidate these next 2 tests
     ['@test Calling sendAction on a component with a reference attr calls the function with arguments']() {
-      this.renderDelegate('{{action-delegate playing=playing}}', {
+      this.renderDelegate('{{action-delegate playing=this.playing}}', {
         playing: null,
       });
 
@@ -150,7 +149,7 @@ moduleFor(
     }
 
     ['@test Calling sendAction on a component with a {{mut}} attr calls the function with arguments']() {
-      this.renderDelegate('{{action-delegate playing=(mut playing)}}', {
+      this.renderDelegate('{{action-delegate playing=(mut this.playing)}}', {
         playing: null,
       });
 
@@ -323,7 +322,7 @@ moduleFor(
         }),
       });
 
-      this.render('{{#if shouldRender}}{{rip-alley}}{{/if}}', {
+      this.render('{{#if this.shouldRender}}{{rip-alley}}{{/if}}', {
         shouldRender: true,
       });
 
@@ -348,10 +347,10 @@ moduleFor(
 
       let component;
 
-      this.router.map(function() {
+      this.router.map(function () {
         this.route('a');
         this.route('b');
-        this.route('c', function() {
+        this.route('c', function () {
           this.route('d');
           this.route('e');
         });
@@ -364,7 +363,7 @@ moduleFor(
             component = this;
           },
         }),
-        template: `{{val}}`,
+        template: `{{this.val}}`,
       });
 
       this.add(
@@ -546,7 +545,7 @@ moduleFor(
             assert.ok(true, 'outerSubmit called');
           },
         }),
-        template: '{{inner-component submitAction=(action outerSubmit)}}',
+        template: '{{inner-component submitAction=(action this.outerSubmit)}}',
       });
 
       this.render('{{outer-component}}');
@@ -583,7 +582,7 @@ moduleFor(
             },
           },
         }),
-        template: `{{inner-component innerSubmit=(action (action "outerSubmit" "${first}") "${second}" third)}}`,
+        template: `{{inner-component innerSubmit=(action (action "outerSubmit" "${first}") "${second}" this.third)}}`,
       });
 
       this.render('{{outer-component}}');
@@ -770,7 +769,7 @@ moduleFor(
         }),
       });
 
-      this.render('{{#if shouldRender}}{{rip-alley}}{{/if}}', {
+      this.render('{{#if this.shouldRender}}{{rip-alley}}{{/if}}', {
         shouldRender: true,
       });
 

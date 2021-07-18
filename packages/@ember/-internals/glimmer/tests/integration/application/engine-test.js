@@ -1,9 +1,14 @@
-import { moduleFor, ApplicationTestCase, strip, runTaskNext } from 'internal-test-helpers';
+import {
+  moduleFor,
+  ApplicationTestCase,
+  ModuleBasedTestResolver,
+  strip,
+  runTaskNext,
+} from 'internal-test-helpers';
 
 import { Component } from '@ember/-internals/glimmer';
 import { Route } from '@ember/-internals/routing';
 import { RSVP } from '@ember/-internals/runtime';
-import { EMBER_ROUTING_MODEL_ARG } from '@ember/canary-features';
 import Controller from '@ember/controller';
 import Engine from '@ember/engine';
 import { next } from '@ember/runloop';
@@ -22,7 +27,7 @@ moduleFor(
           this._enginePromises = Object.create(null);
           this._resolvedEngines = Object.create(null);
 
-          this._routerMicrolib.getRoute = name => {
+          this._routerMicrolib.getRoute = (name) => {
             let engineInfo = this._engineInfoByRoute[name];
             if (!engineInfo) {
               return getRoute(name);
@@ -36,7 +41,7 @@ moduleFor(
             let enginePromise = this._enginePromises[engineName];
 
             if (!enginePromise) {
-              enginePromise = new RSVP.Promise(resolve => {
+              enginePromise = new RSVP.Promise((resolve) => {
                 setTimeout(() => {
                   this._resolvedEngines[engineName] = true;
 
@@ -57,11 +62,11 @@ moduleFor(
 
       this.addTemplate('application', 'Application{{outlet}}');
 
-      this.router.map(function() {
+      this.router.map(function () {
         this.mount('blog');
       });
-      this.add('route-map:blog', function() {
-        this.route('post', function() {
+      this.add('route-map:blog', function () {
+        this.route('post', function () {
           this.route('comments');
           this.route('likes');
         });
@@ -80,6 +85,8 @@ moduleFor(
       this.add(
         'engine:blog',
         Engine.extend({
+          Resolver: ModuleBasedTestResolver,
+
           init() {
             this._super(...arguments);
             this.register(
@@ -101,7 +108,7 @@ moduleFor(
                 queryParams: ['official'],
               })
             );
-            this.register('template:application', compile('Engine{{lang}}{{outlet}}'));
+            this.register('template:application', compile('Engine{{this.lang}}{{outlet}}'));
             this.register(
               'route:application',
               Route.extend({
@@ -131,6 +138,8 @@ moduleFor(
       this.add(
         'engine:chat-engine',
         Engine.extend({
+          Resolver: ModuleBasedTestResolver,
+
           init() {
             this._super(...arguments);
             this.register('template:application', compile('Engine'));
@@ -151,10 +160,10 @@ moduleFor(
     setupAppAndRoutableEngineWithPartial(hooks) {
       this.addTemplate('application', 'Application{{outlet}}');
 
-      this.router.map(function() {
+      this.router.map(function () {
         this.mount('blog');
       });
-      this.add('route-map:blog', function() {});
+      this.add('route-map:blog', function () {});
       this.add(
         'route:application',
         Route.extend({
@@ -167,6 +176,8 @@ moduleFor(
       this.add(
         'engine:blog',
         Engine.extend({
+          Resolver: ModuleBasedTestResolver,
+
           init() {
             this._super(...arguments);
             this.register('template:foo', compile('foo partial'));
@@ -202,6 +213,8 @@ moduleFor(
       this.add(
         'engine:chat-engine',
         Engine.extend({
+          Resolver: ModuleBasedTestResolver,
+
           init() {
             this._super(...arguments);
             this.register('template:foo', compile('foo partial'));
@@ -230,6 +243,8 @@ moduleFor(
       this.add(
         'engine:chat-engine',
         Engine.extend({
+          Resolver: ModuleBasedTestResolver,
+
           init() {
             this._super(...arguments);
             this.register('template:components/foo-bar', compile(`{{partial "troll"}}`));
@@ -240,7 +255,10 @@ moduleFor(
                 contextType: 'Engine',
               })
             );
-            this.register('template:application', compile('Engine {{foo-bar wat=contextType}}'));
+            this.register(
+              'template:application',
+              compile('Engine {{foo-bar wat=this.contextType}}')
+            );
           },
         })
       );
@@ -251,6 +269,13 @@ moduleFor(
     }
 
     ['@test attrs in an engine']() {
+      expectDeprecation(
+        `The use of \`{{partial}}\` is deprecated, please refactor the "troll" partial to a component`
+      );
+      expectDeprecation(
+        'Using {{attrs}} to reference named arguments has been deprecated. {{attrs.wat}} should be updated to {{@wat}}. (L1:C2) '
+      );
+
       this.setupEngineWithAttrs([]);
 
       return this.visit('/').then(() => {
@@ -259,14 +284,18 @@ moduleFor(
     }
 
     ['@test sharing a template between engine and application has separate refinements']() {
-      this.assert.expect(1);
+      this.assert.expect(2);
 
       let sharedTemplate = compile(strip`
-      <h1>{{contextType}}</h1>
+      <h1>{{this.contextType}}</h1>
       {{ambiguous-curlies}}
 
       {{outlet}}
     `);
+
+      expectDeprecation(
+        /The `[^`]+` property(?: path)? was used in the `[^`]+` template without using `this`. This fallback behavior has been deprecated, all properties must be looked up on `this` when used in the template: {{[^}]+}}/
+      );
 
       this.add('template:application', sharedTemplate);
       this.add(
@@ -277,14 +306,16 @@ moduleFor(
         })
       );
 
-      this.router.map(function() {
+      this.router.map(function () {
         this.mount('blog');
       });
-      this.add('route-map:blog', function() {});
+      this.add('route-map:blog', function () {});
 
       this.add(
         'engine:blog',
         Engine.extend({
+          Resolver: ModuleBasedTestResolver,
+
           init() {
             this._super(...arguments);
 
@@ -311,7 +342,11 @@ moduleFor(
     }
 
     ['@test sharing a layout between engine and application has separate refinements']() {
-      this.assert.expect(1);
+      this.assert.expect(2);
+
+      expectDeprecation(
+        /The `[^`]+` property(?: path)? was used in the `[^`]+` template without using `this`. This fallback behavior has been deprecated, all properties must be looked up on `this` when used in the template: {{[^}]+}}/
+      );
 
       let sharedLayout = compile(strip`
         {{ambiguous-curlies}}
@@ -332,14 +367,16 @@ moduleFor(
 
       this.add('component:my-component', sharedComponent);
 
-      this.router.map(function() {
+      this.router.map(function () {
         this.mount('blog');
       });
-      this.add('route-map:blog', function() {});
+      this.add('route-map:blog', function () {});
 
       this.add(
         'engine:blog',
         Engine.extend({
+          Resolver: ModuleBasedTestResolver,
+
           init() {
             this._super(...arguments);
             this.register(
@@ -431,7 +468,11 @@ moduleFor(
     }
 
     ['@test visit() with partials in routable engine'](assert) {
-      assert.expect(2);
+      assert.expect(3);
+
+      expectDeprecation(
+        `The use of \`{{partial}}\` is deprecated, please refactor the "foo" partial to a component`
+      );
 
       let hooks = [];
 
@@ -449,7 +490,11 @@ moduleFor(
     }
 
     ['@test visit() with partials in non-routable engine'](assert) {
-      assert.expect(2);
+      assert.expect(3);
+
+      expectDeprecation(
+        `The use of \`{{partial}}\` is deprecated, please refactor the "foo" partial to a component`
+      );
 
       let hooks = [];
 
@@ -474,6 +519,8 @@ moduleFor(
       this.add(
         'engine:blog',
         Engine.extend({
+          Resolver: ModuleBasedTestResolver,
+
           init() {
             this._super(...arguments);
             this.register('template:application', compile('Engine{{outlet}}'));
@@ -509,7 +556,7 @@ moduleFor(
       let errorEntered = RSVP.defer();
 
       this.setupAppAndRoutableEngine();
-      this.additionalEngineRegistrations(function() {
+      this.additionalEngineRegistrations(function () {
         this.register(
           'route:application_error',
           Route.extend({
@@ -518,12 +565,7 @@ moduleFor(
             },
           })
         );
-        this.register(
-          'template:application_error',
-          compile(
-            EMBER_ROUTING_MODEL_ARG ? 'Error! {{@model.message}}' : 'Error! {{this.model.message}}'
-          )
-        );
+        this.register('template:application_error', compile('Error! {{@model.message}}'));
         this.register(
           'route:post',
           Route.extend({
@@ -553,7 +595,7 @@ moduleFor(
       let errorEntered = RSVP.defer();
 
       this.setupAppAndRoutableEngine();
-      this.additionalEngineRegistrations(function() {
+      this.additionalEngineRegistrations(function () {
         this.register(
           'route:error',
           Route.extend({
@@ -562,12 +604,7 @@ moduleFor(
             },
           })
         );
-        this.register(
-          'template:error',
-          compile(
-            EMBER_ROUTING_MODEL_ARG ? 'Error! {{@model.message}}' : 'Error! {{this.model.message}}'
-          )
-        );
+        this.register('template:error', compile('Error! {{@model.message}}'));
         this.register(
           'route:post',
           Route.extend({
@@ -597,7 +634,7 @@ moduleFor(
       let errorEntered = RSVP.defer();
 
       this.setupAppAndRoutableEngine();
-      this.additionalEngineRegistrations(function() {
+      this.additionalEngineRegistrations(function () {
         this.register(
           'route:post_error',
           Route.extend({
@@ -606,12 +643,7 @@ moduleFor(
             },
           })
         );
-        this.register(
-          'template:post_error',
-          compile(
-            EMBER_ROUTING_MODEL_ARG ? 'Error! {{@model.message}}' : 'Error! {{this.model.message}}'
-          )
-        );
+        this.register('template:post_error', compile('Error! {{@model.message}}'));
         this.register(
           'route:post',
           Route.extend({
@@ -641,7 +673,7 @@ moduleFor(
       let errorEntered = RSVP.defer();
 
       this.setupAppAndRoutableEngine();
-      this.additionalEngineRegistrations(function() {
+      this.additionalEngineRegistrations(function () {
         this.register(
           'route:post.error',
           Route.extend({
@@ -650,12 +682,7 @@ moduleFor(
             },
           })
         );
-        this.register(
-          'template:post.error',
-          compile(
-            EMBER_ROUTING_MODEL_ARG ? 'Error! {{@model.message}}' : 'Error! {{this.model.message}}'
-          )
-        );
+        this.register('template:post.error', compile('Error! {{@model.message}}'));
         this.register(
           'route:post.comments',
           Route.extend({
@@ -687,7 +714,7 @@ moduleFor(
       let resolveLoading = RSVP.defer();
 
       this.setupAppAndRoutableEngine();
-      this.additionalEngineRegistrations(function() {
+      this.additionalEngineRegistrations(function () {
         this.register(
           'route:application_loading',
           Route.extend({
@@ -734,7 +761,7 @@ moduleFor(
       let resolveLoading = RSVP.defer();
 
       this.setupAppAndRoutableEngine();
-      this.additionalEngineRegistrations(function() {
+      this.additionalEngineRegistrations(function () {
         this.register(
           'route:loading',
           Route.extend({
@@ -779,7 +806,7 @@ moduleFor(
       let resolveLoading;
 
       this.setupAppAndRoutableEngine();
-      this.additionalEngineRegistrations(function() {
+      this.additionalEngineRegistrations(function () {
         this.register('template:post', compile('{{outlet}}'));
         this.register('template:post.comments', compile('Comments'));
         this.register('template:post.likes_loading', compile('Loading'));
@@ -788,7 +815,7 @@ moduleFor(
           'route:post.likes',
           Route.extend({
             model() {
-              return new RSVP.Promise(resolve => {
+              return new RSVP.Promise((resolve) => {
                 resolveLoading = resolve;
               });
             },
@@ -819,7 +846,7 @@ moduleFor(
       let resolveLoading = RSVP.defer();
 
       this.setupAppAndRoutableEngine();
-      this.additionalEngineRegistrations(function() {
+      this.additionalEngineRegistrations(function () {
         this.register('template:post', compile('{{outlet}}'));
         this.register('template:post.comments', compile('Comments'));
         this.register(
@@ -862,9 +889,11 @@ moduleFor(
 
     ["@test query params don't have stickiness by default between model"](assert) {
       assert.expect(1);
-      let tmpl = '{{#link-to "blog.category" 1337}}Category 1337{{/link-to}}';
+
+      let tmpl = '<LinkTo @route="category" @model={{1337}}>Category 1337</LinkTo>';
+
       this.setupAppAndRoutableEngine();
-      this.additionalEngineRegistrations(function() {
+      this.additionalEngineRegistrations(function () {
         this.register('template:category', compile(tmpl));
       });
 
@@ -877,14 +906,33 @@ moduleFor(
       });
     }
 
+    '@test query params only transitions work properly'(assert) {
+      assert.expect(1);
+
+      let tmpl = '<LinkTo @query={{hash type="news"}}>News</LinkTo>';
+
+      this.setupAppAndRoutableEngine();
+      this.additionalEngineRegistrations(function () {
+        this.register('template:category', compile(tmpl));
+      });
+
+      return this.visit('/blog/category/1').then(() => {
+        let suffix = '/blog/category/1?type=news';
+        let href = this.element.querySelector('a').href;
+
+        // check if link ends with the suffix
+        assert.ok(this.stringsEndWith(href, suffix));
+      });
+    }
+
     async ['@test query params in customized controllerName have stickiness by default between model'](
       assert
     ) {
       assert.expect(2);
       let tmpl =
-        '{{#link-to "blog.author" 1337 class="author-1337"}}Author 1337{{/link-to}}{{#link-to "blog.author" 1 class="author-1"}}Author 1{{/link-to}}';
+        '<LinkTo @route="author" @model={{1337}} class="author-1337">Author 1337</LinkTo><LinkTo @route="author" @model=1 class="author-1">Author 1</LinkTo>';
       this.setupAppAndRoutableEngine();
-      this.additionalEngineRegistrations(function() {
+      this.additionalEngineRegistrations(function () {
         this.register('template:author', compile(tmpl));
       });
 
@@ -905,7 +953,7 @@ moduleFor(
 
       let hooks = [];
 
-      this.additionalEngineRegistrations(function() {
+      this.additionalEngineRegistrations(function () {
         this.register(
           'route:application',
           Route.extend({
@@ -922,7 +970,7 @@ moduleFor(
         .then(() => {
           return this.visit('/blog');
         })
-        .catch(error => {
+        .catch((error) => {
           assert.equal(error.message, 'Whoops! Something went wrong...');
         });
     }

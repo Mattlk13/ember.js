@@ -1,5 +1,4 @@
 import { getOwner } from '@ember/-internals/owner';
-import { assign } from '@ember/polyfills';
 import { assert } from '@ember/debug';
 import { get, set } from '@ember/-internals/metal';
 import { Object as EmberObject } from '@ember/-internals/runtime';
@@ -67,7 +66,7 @@ export default EmberObject.extend({
     @type Object
     @private
   */
-  events: assign(
+  events: Object.assign(
     {
       touchstart: 'touchStart',
       touchmove: 'touchMove',
@@ -121,18 +120,11 @@ export default EmberObject.extend({
 
   init() {
     this._super();
-
-    assert(
-      'EventDispatcher should never be instantiated in fastboot mode. Please report this as an Ember bug.',
-      (() => {
-        let owner = getOwner(this);
-        let environment = owner.lookup('-environment:main');
-
-        return environment.isInteractive;
-      })()
-    );
-
     this._eventHandlers = Object.create(null);
+    this._didSetup = false;
+    this.finalEventNameMapping = null;
+    this._sanitizedRootElement = null;
+    this.lazyEvents = new Map();
   },
 
   /**
@@ -148,7 +140,22 @@ export default EmberObject.extend({
     @param addedEvents {Object}
   */
   setup(addedEvents, _rootElement) {
-    let events = (this._finalEvents = assign({}, get(this, 'events'), addedEvents));
+    assert(
+      'EventDispatcher should never be setup in fastboot mode. Please report this as an Ember bug.',
+      (() => {
+        let owner = getOwner(this);
+        let environment = owner.lookup('-environment:main');
+
+        return environment.isInteractive;
+      })()
+    );
+
+    let events = (this.finalEventNameMapping = Object.assign({}, get(this, 'events'), addedEvents));
+    this._reverseEventNameMapping = Object.keys(events).reduce(
+      (result, key) => Object.assign(result, { [events[key]]: key }),
+      {}
+    );
+    let lazyEvents = this.lazyEvents;
 
     if (_rootElement !== undefined && _rootElement !== null) {
       set(this, 'rootElement', _rootElement);
@@ -164,8 +171,9 @@ export default EmberObject.extend({
       }
 
       assert(
-        `You cannot use the same root element (${get(this, 'rootElement') ||
-          rootElement.tagName}) multiple times in an Ember.Application`,
+        `You cannot use the same root element (${
+          get(this, 'rootElement') || rootElement.tagName
+        }) multiple times in an Ember.Application`,
         !rootElement.classList.contains(ROOT_ELEMENT_CLASS)
       );
       assert(
@@ -191,15 +199,17 @@ export default EmberObject.extend({
       rootElement.classList.add(ROOT_ELEMENT_CLASS);
 
       assert(
-        `Unable to add '${ROOT_ELEMENT_CLASS}' class to root element (${get(this, 'rootElement') ||
-          rootElement.tagName}). Make sure you set rootElement to the body or an element in the body.`,
+        `Unable to add '${ROOT_ELEMENT_CLASS}' class to root element (${
+          get(this, 'rootElement') || rootElement.tagName
+        }). Make sure you set rootElement to the body or an element in the body.`,
         rootElement.classList.contains(ROOT_ELEMENT_CLASS)
       );
     } else {
       rootElement = jQuery(rootElementSelector);
       assert(
-        `You cannot use the same root element (${rootElement.selector ||
-          rootElement[0].tagName}) multiple times in an Ember.Application`,
+        `You cannot use the same root element (${
+          rootElement.selector || rootElement[0].tagName
+        }) multiple times in an Ember.Application`,
         !rootElement.is(ROOT_ELEMENT_SELECTOR)
       );
       assert(
@@ -215,18 +225,50 @@ export default EmberObject.extend({
 
       if (!rootElement.is(ROOT_ELEMENT_SELECTOR)) {
         throw new TypeError(
-          `Unable to add '${ROOT_ELEMENT_CLASS}' class to root element (${rootElement.selector ||
-            rootElement[0]
-              .tagName}). Make sure you set rootElement to the body or an element in the body.`
+          `Unable to add '${ROOT_ELEMENT_CLASS}' class to root element (${
+            rootElement.selector || rootElement[0].tagName
+          }). Make sure you set rootElement to the body or an element in the body.`
         );
       }
     }
 
+    // save off the final sanitized root element (for usage in setupHandler)
+    this._sanitizedRootElement = rootElement;
+
+    // setup event listeners for the non-lazily setup events
     for (let event in events) {
-      if (events.hasOwnProperty(event)) {
-        this.setupHandler(rootElement, event, events[event]);
+      if (Object.prototype.hasOwnProperty.call(events, event)) {
+        lazyEvents.set(event, events[event]);
       }
     }
+
+    this._didSetup = true;
+  },
+
+  /**
+    Setup event listeners for the given browser event name
+
+    @private
+    @method setupHandlerForBrowserEvent
+    @param event the name of the event in the browser
+  */
+  setupHandlerForBrowserEvent(event) {
+    this.setupHandler(this._sanitizedRootElement, event, this.finalEventNameMapping[event]);
+  },
+
+  /**
+    Setup event listeners for the given Ember event name (camel case)
+
+    @private
+    @method setupHandlerForEmberEvent
+    @param eventName
+  */
+  setupHandlerForEmberEvent(eventName) {
+    this.setupHandler(
+      this._sanitizedRootElement,
+      this._reverseEventNameMapping[eventName],
+      eventName
+    );
   },
 
   /**
@@ -240,12 +282,12 @@ export default EmberObject.extend({
     @private
     @method setupHandler
     @param {Element} rootElement
-    @param {String} event the browser-originated event to listen to
+    @param {String} event the name of the event in the browser
     @param {String} eventName the name of the method to call on the view
   */
   setupHandler(rootElement, event, eventName) {
-    if (eventName === null) {
-      return;
+    if (eventName === null || !this.lazyEvents.has(event)) {
+      return; // nothing to do
     }
 
     if (!JQUERY_INTEGRATION || jQueryDisabled) {
@@ -336,7 +378,7 @@ export default EmberObject.extend({
           return fakeEvent;
         };
 
-        let handleMappedEvent = (this._eventHandlers[mappedEventType] = event => {
+        let handleMappedEvent = (this._eventHandlers[mappedEventType] = (event) => {
           let target = event.target;
           let related = event.relatedTarget;
 
@@ -360,7 +402,7 @@ export default EmberObject.extend({
 
         rootElement.addEventListener(mappedEventType, handleMappedEvent);
       } else {
-        let handleEvent = (this._eventHandlers[event] = event => {
+        let handleEvent = (this._eventHandlers[event] = (event) => {
           let target = event.target;
 
           do {
@@ -388,7 +430,7 @@ export default EmberObject.extend({
         rootElement.addEventListener(event, handleEvent);
       }
     } else {
-      rootElement.on(`${event}.ember`, '.ember-view', function(evt) {
+      rootElement.on(`${event}.ember`, '.ember-view', function (evt) {
         let view = getElementView(this);
         let result = true;
 
@@ -399,7 +441,7 @@ export default EmberObject.extend({
         return result;
       });
 
-      rootElement.on(`${event}.ember`, '[data-ember-action]', evt => {
+      rootElement.on(`${event}.ember`, '[data-ember-action]', (evt) => {
         let attributes = evt.currentTarget.attributes;
         let handledActions = [];
 
@@ -426,9 +468,15 @@ export default EmberObject.extend({
         }
       });
     }
+
+    this.lazyEvents.delete(event);
   },
 
   destroy() {
+    if (this._didSetup === false) {
+      return;
+    }
+
     let rootElementSelector = get(this, 'rootElement');
     let rootElement;
     if (rootElementSelector.nodeType) {

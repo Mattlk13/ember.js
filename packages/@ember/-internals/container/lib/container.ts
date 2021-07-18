@@ -1,8 +1,6 @@
-import { Factory, LookupOptions, Owner, OWNER, setOwner } from '@ember/-internals/owner';
-import { dictionary, HAS_NATIVE_PROXY } from '@ember/-internals/utils';
-import { EMBER_MODULE_UNIFICATION } from '@ember/canary-features';
+import { Factory, LookupOptions, Owner, setOwner } from '@ember/-internals/owner';
+import { dictionary, HAS_NATIVE_PROXY, HAS_NATIVE_SYMBOL, symbol } from '@ember/-internals/utils';
 import { assert } from '@ember/debug';
-import { assign } from '@ember/polyfills';
 import { DEBUG } from '@glimmer/env';
 import Registry, { DebugRegistry, Injection } from './registry';
 
@@ -149,7 +147,9 @@ export default class Container {
    @return {any}
    */
   lookup(fullName: string, options: LookupOptions): any {
-    assert('expected container not to be destroyed', !this.isDestroyed);
+    if (this.isDestroyed) {
+      throw new Error(`Can not call \`.lookup\` after the owner has been destroyed`);
+    }
     assert('fullName must be a proper full name', this.registry.isValidFullName(fullName));
     return lookup(this, this.registry.normalize(fullName), options);
   }
@@ -161,8 +161,9 @@ export default class Container {
    @method destroy
    */
   destroy(): void {
-    destroyDestroyables(this);
     this.isDestroying = true;
+
+    destroyDestroyables(this);
   }
 
   finalizeDestroy(): void {
@@ -195,7 +196,9 @@ export default class Container {
    @returns { Object }
   */
   ownerInjection() {
-    return { [OWNER]: this.owner };
+    let injection = {};
+    setOwner(injection, this.owner!);
+    return injection;
   }
 
   /**
@@ -210,22 +213,13 @@ export default class Container {
    @param {String} [options.source] The fullname of the request source (used for local lookup)
    @return {any}
    */
-  factoryFor<T, C>(fullName: string, options: LookupOptions = {}): Factory<T, C> | undefined {
-    assert('expected container not to be destroyed', !this.isDestroyed);
+  factoryFor<T, C>(fullName: string): Factory<T, C> | undefined {
+    if (this.isDestroyed) {
+      throw new Error(`Can not call \`.factoryFor\` after the owner has been destroyed`);
+    }
     let normalizedName = this.registry.normalize(fullName);
 
     assert('fullName must be a proper full name', this.registry.isValidFullName(normalizedName));
-    assert(
-      'EMBER_MODULE_UNIFICATION must be enabled to pass a namespace option to factoryFor',
-      EMBER_MODULE_UNIFICATION || !options.namespace
-    );
-
-    if (options.source || options.namespace) {
-      normalizedName = this.registry.expandLocalLookup(fullName, options);
-      if (!normalizedName) {
-        return;
-      }
-    }
 
     return factoryFor<T, C>(this, normalizedName, fullName) as Factory<T, C> | undefined;
   }
@@ -239,7 +233,7 @@ if (DEBUG) {
  * Wrap a factory manager in a proxy which will not permit properties to be
  * set on the manager.
  */
-function wrapManagerInDeprecationProxy<T, C>(manager: FactoryManager<T, C>) {
+function wrapManagerInDeprecationProxy<T, C>(manager: FactoryManager<T, C>): FactoryManager<T, C> {
   if (HAS_NATIVE_PROXY) {
     let validator = {
       set(_obj: T, prop: keyof T) {
@@ -260,8 +254,7 @@ function wrapManagerInDeprecationProxy<T, C>(manager: FactoryManager<T, C>) {
       },
     };
 
-    let proxy = new Proxy(proxiedManager, validator as any);
-    FACTORY_FOR.set(proxy, manager);
+    return new Proxy(proxiedManager, validator as any) as any;
   }
 
   return manager;
@@ -276,21 +269,12 @@ function isInstantiatable(container: Container, fullName: string) {
 }
 
 function lookup(container: Container, fullName: string, options: LookupOptions = {}) {
-  assert(
-    'EMBER_MODULE_UNIFICATION must be enabled to pass a namespace option to lookup',
-    EMBER_MODULE_UNIFICATION || !options.namespace
-  );
-
   let normalizedName = fullName;
 
-  if (options.source || options.namespace) {
-    normalizedName = container.registry.expandLocalLookup(fullName, options);
-    if (!normalizedName) {
-      return;
-    }
-  }
-
-  if (options.singleton !== false) {
+  if (
+    options.singleton === true ||
+    (options.singleton === undefined && isSingleton(container, fullName))
+  ) {
     let cached = container.cache[normalizedName];
     if (cached !== undefined) {
       return cached;
@@ -353,7 +337,7 @@ function isSingletonInstance(
   return (
     singleton !== false &&
     instantiate !== false &&
-    isSingleton(container, fullName) &&
+    (singleton === true || isSingleton(container, fullName)) &&
     isInstantiatable(container, fullName)
   );
 }
@@ -377,7 +361,7 @@ function isFactoryInstance(
 ) {
   return (
     instantiate !== false &&
-    (singleton !== false || isSingleton(container, fullName)) &&
+    (singleton === false || !isSingleton(container, fullName)) &&
     isInstantiatable(container, fullName)
   );
 }
@@ -397,7 +381,17 @@ function instantiateFactory(
   // SomeClass { singleton: true, instantiate: true } | { singleton: true } | { instantiate: true } | {}
   // By default majority of objects fall into this case
   if (isSingletonInstance(container, fullName, options)) {
-    return (container.cache[normalizedName] = factoryManager.create());
+    let instance = (container.cache[normalizedName] = factoryManager.create() as CacheMember);
+
+    // if this lookup happened _during_ destruction (emits a deprecation, but
+    // is still possible) ensure that it gets destroyed
+    if (container.isDestroying) {
+      if (typeof instance.destroy === 'function') {
+        instance.destroy();
+      }
+    }
+
+    return instance;
   }
 
   // SomeClass { singleton: false, instantiate: true }
@@ -417,7 +411,7 @@ function instantiateFactory(
 }
 
 interface BuildInjectionsResult {
-  injections: { [key: string]: object } | undefined;
+  injections: { [key: string]: unknown };
   isDynamic: boolean;
 }
 
@@ -431,18 +425,11 @@ function processInjections(
   }
 
   let hash = result.injections;
-  if (hash === undefined) {
-    hash = result.injections = {};
-  }
 
   for (let i = 0; i < injections.length; i++) {
-    let { property, specifier, source } = injections[i];
+    let { property, specifier } = injections[i];
 
-    if (source) {
-      hash[property] = lookup(container, specifier, { source });
-    } else {
-      hash[property] = lookup(container, specifier);
-    }
+    hash[property] = lookup(container, specifier);
 
     if (!result.isDynamic) {
       result.isDynamic = !isSingleton(container, specifier);
@@ -455,8 +442,12 @@ function buildInjections(
   typeInjections: Injection[],
   injections: Injection[]
 ): BuildInjectionsResult {
+  let injectionsHash = {};
+
+  setOwner(injectionsHash, container.owner!);
+
   let result: BuildInjectionsResult = {
-    injections: undefined,
+    injections: injectionsHash,
     isDynamic: false,
   };
 
@@ -526,7 +517,16 @@ declare interface DebugFactory<T, C> extends Factory<T, C> {
   _lazyInjections(): { [key: string]: LazyInjection };
 }
 
-export const FACTORY_FOR = new WeakMap<any, FactoryManager<any, any>>();
+export const INIT_FACTORY = symbol('INIT_FACTORY');
+
+export function getFactoryFor(obj: any): FactoryManager<any, any> {
+  return obj[INIT_FACTORY];
+}
+
+export function setFactoryFor(obj: any, factory: FactoryManager<any, any>): void {
+  obj[INIT_FACTORY] = factory;
+}
+
 class FactoryManager<T, C> {
   readonly container: Container;
   readonly owner: Owner | null;
@@ -534,7 +534,7 @@ class FactoryManager<T, C> {
   readonly fullName: string;
   readonly normalizedName: string;
   private madeToString: string | undefined;
-  injections: { [key: string]: object } | undefined;
+  injections: { [key: string]: unknown } | undefined;
 
   constructor(
     container: Container,
@@ -549,7 +549,11 @@ class FactoryManager<T, C> {
     this.normalizedName = normalizedName;
     this.madeToString = undefined;
     this.injections = undefined;
-    FACTORY_FOR.set(this, this);
+    setFactoryFor(this, this);
+
+    if (factory && (HAS_NATIVE_SYMBOL || INIT_FACTORY in factory)) {
+      setFactoryFor(factory, this);
+    }
   }
 
   toString(): string {
@@ -561,18 +565,27 @@ class FactoryManager<T, C> {
   }
 
   create(options?: { [prop: string]: any }) {
-    let injectionsCache = this.injections;
-    if (injectionsCache === undefined) {
+    let { container } = this;
+
+    if (container.isDestroyed) {
+      throw new Error(
+        `Can not create new instances after the owner has been destroyed (you attempted to create ${this.fullName})`
+      );
+    }
+
+    let props = this.injections;
+    if (props === undefined) {
       let { injections, isDynamic } = injectionsFor(this.container, this.normalizedName);
-      injectionsCache = injections;
+      setFactoryFor(injections, this);
+      props = injections;
+
       if (!isDynamic) {
         this.injections = injections;
       }
     }
 
-    let props = injectionsCache;
     if (options !== undefined) {
-      props = assign({}, injectionsCache, options);
+      props = Object.assign({}, props, options);
     }
 
     if (DEBUG) {
@@ -591,36 +604,13 @@ class FactoryManager<T, C> {
       }
 
       validationCache[this.fullName] = true;
-    }
 
-    if (!this.class.create) {
-      throw new Error(
-        `Failed to create an instance of '${this.normalizedName}'. Most likely an improperly defined class or an invalid module export.`
+      assert(
+        `Failed to create an instance of '${this.normalizedName}'. Most likely an improperly defined class or an invalid module export.`,
+        typeof this.class.create === 'function'
       );
     }
 
-    // required to allow access to things like
-    // the customized toString, _debugContainerKey,
-    // owner, etc. without a double extend and without
-    // modifying the objects properties
-    if (typeof this.class._initFactory === 'function') {
-      this.class._initFactory(this);
-    } else {
-      // in the non-EmberObject case we need to still setOwner
-      // this is required for supporting glimmer environment and
-      // template instantiation which rely heavily on
-      // `options[OWNER]` being passed into `create`
-      // TODO: clean this up, and remove in future versions
-      if (options === undefined || props === undefined) {
-        // avoid mutating `props` here since they are the cached injections
-        props = assign({}, props);
-      }
-      setOwner(props, this.owner!);
-    }
-
-    let instance = this.class.create(props);
-    FACTORY_FOR.set(instance, this);
-
-    return instance;
+    return this.class.create(props);
   }
 }

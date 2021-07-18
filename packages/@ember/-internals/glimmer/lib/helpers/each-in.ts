@@ -1,10 +1,13 @@
 /**
 @module ember
 */
-import { symbol } from '@ember/-internals/utils';
-import { Tag, VersionedPathReference } from '@glimmer/reference';
-import { Arguments, VM } from '@glimmer/runtime';
-import { Opaque } from '@glimmer/util';
+import { tagForObject } from '@ember/-internals/metal';
+import { _contentFor } from '@ember/-internals/runtime';
+import { isProxy } from '@ember/-internals/utils';
+import { CapturedArguments } from '@glimmer/interfaces';
+import { createComputeRef, valueForRef } from '@glimmer/reference';
+import { consumeTag } from '@glimmer/validator';
+import { internalHelper } from './internal-helper';
 
 /**
   The `{{#each}}` helper loops over elements in a collection. It is an extension
@@ -92,6 +95,11 @@ import { Opaque } from '@glimmer/util';
   has previously seen an object from the `@developers` array with a matching
   name, its DOM elements will be re-used.
 
+  There are two special values for `key`:
+
+    * `@index` - The index of the item in the array.
+    * `@identity` - The item in the array itself.
+
   ### {{else}} condition
 
   `{{#each}}` can have a matching `{{else}}`. The contents of this block will render
@@ -115,56 +123,63 @@ import { Opaque } from '@glimmer/util';
 /**
   The `{{each-in}}` helper loops over properties on an object.
 
-  For example, if the `@user` argument contains this object:
+  For example, given this component definition:
 
-  ```javascript
-  {
-    "name": "Shelly Sails",
-    "age": 42
+  ```app/components/developer-details.js
+  import Component from '@glimmer/component';
+  import { tracked } from '@glimmer/tracking';
+
+  export default class extends Component {
+    @tracked developer = {
+      "name": "Shelly Sails",
+      "age": 42
+    };
   }
   ```
 
-  This template would display all properties on the `@user`
+  This template would display all properties on the `developer`
   object in a list:
 
-  ```handlebars
+  ```app/components/developer-details.hbs
   <ul>
-  {{#each-in @user as |key value|}}
-    <li>{{key}}: {{value}}</li>
-  {{/each-in}}
+    {{#each-in this.developer as |key value|}}
+      <li>{{key}}: {{value}}</li>
+    {{/each-in}}
   </ul>
   ```
 
-  Outputting their name and age.
+  Outputting their name and age:
+
+  ```html
+  <ul>
+    <li>name: Shelly Sails</li>
+    <li>age: 42</li>
+  </ul>
+  ```
 
   @method each-in
   @for Ember.Templates.helpers
   @public
   @since 2.1.0
 */
-const EACH_IN_REFERENCE = symbol('EACH_IN');
-
-class EachInReference implements VersionedPathReference {
-  public tag: Tag;
-
-  constructor(private inner: VersionedPathReference) {
-    this.tag = inner.tag;
-    this[EACH_IN_REFERENCE] = true;
-  }
-
-  value(): Opaque {
-    return this.inner.value();
-  }
-
-  get(key: string): VersionedPathReference {
-    return this.inner.get(key);
-  }
+export class EachInWrapper {
+  constructor(public inner: unknown) {}
 }
 
-export function isEachIn(ref: Opaque): ref is VersionedPathReference {
-  return ref !== null && typeof ref === 'object' && ref[EACH_IN_REFERENCE];
-}
+export default internalHelper(({ positional }: CapturedArguments) => {
+  let inner = positional[0];
 
-export default function(_vm: VM, args: Arguments) {
-  return new EachInReference(args.positional.at(0));
-}
+  return createComputeRef(() => {
+    let iterable = valueForRef(inner);
+
+    consumeTag(tagForObject(iterable));
+
+    if (isProxy(iterable)) {
+      // this is because the each-in doesn't actually get(proxy, 'key') but bypasses it
+      // and the proxy's tag is lazy updated on access
+      iterable = _contentFor(iterable);
+    }
+
+    return new EachInWrapper(iterable);
+  });
+});

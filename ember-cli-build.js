@@ -8,11 +8,14 @@ const testIndexHTML = require('./broccoli/test-index-html');
 const testPolyfills = require('./broccoli/test-polyfills');
 const rollupPackage = require('./broccoli/rollup-package');
 const minify = require('./broccoli/minify');
+const debugTree = require('broccoli-debug').buildDebugCallback('ember-source:ember-cli-build');
+
+Error.stackTraceLimit = Infinity;
 
 const {
   routerES,
   jquery,
-  internalLoader,
+  loader,
   qunit,
   handlebarsES,
   rsvpES,
@@ -57,80 +60,102 @@ function withTargets(project, fn) {
   };
 }
 
-module.exports = function({ project }) {
-  let emberSource = project.addons.find(a => a.name === 'ember-source');
+module.exports = function ({ project }) {
+  let emberSource = project.addons.find((a) => a.name === 'ember-source');
 
   let transpileTree = withTargets(project, emberSource.transpileTree.bind(emberSource));
   let emberBundles = withTargets(project, emberSource.buildEmberBundles.bind(emberSource));
 
-  let packages = new MergeTrees([
-    // dynamically generated packages
-    emberVersionES(),
+  let packages = debugTree(
+    new MergeTrees([
+      // dynamically generated packages
+      emberVersionES(),
 
-    // packages/** (after typescript compilation)
-    getPackagesES(),
+      // packages/** (after typescript compilation)
+      getPackagesES(),
 
-    // externalized helpers
-    babelHelpers(),
-  ]);
+      // externalized helpers
+      babelHelpers(),
+    ]),
+    'packages:initial'
+  );
 
   // Rollup
   if (SHOULD_ROLLUP) {
-    packages = new MergeTrees([
-      new Funnel(packages, {
-        exclude: [
-          '@ember/-internals/browser-environment/index.js',
-          '@ember/-internals/browser-environment/lib/**',
-          '@ember/-internals/container/index.js',
-          '@ember/-internals/container/lib/**',
-          '@ember/-internals/environment/index.js',
-          '@ember/-internals/environment/lib/**',
-          '@ember/-internals/glimmer/index.js',
-          '@ember/-internals/glimmer/lib/**',
-          '@ember/-internals/metal/index.js',
-          '@ember/-internals/metal/lib/**',
-          '@ember/-internals/utils/index.js',
-          '@ember/-internals/utils/lib/**',
-        ],
-      }),
-      rollupPackage(packages, '@ember/-internals/browser-environment'),
-      rollupPackage(packages, '@ember/-internals/environment'),
-      rollupPackage(packages, '@ember/-internals/glimmer'),
-      rollupPackage(packages, '@ember/-internals/metal'),
-      rollupPackage(packages, '@ember/-internals/utils'),
-      rollupPackage(packages, '@ember/-internals/container'),
-    ]);
+    packages = debugTree(
+      new MergeTrees([
+        new Funnel(packages, {
+          exclude: [
+            '@ember/-internals/browser-environment/index.js',
+            '@ember/-internals/browser-environment/lib/**',
+            '@ember/-internals/container/index.js',
+            '@ember/-internals/container/lib/**',
+            '@ember/-internals/environment/index.js',
+            '@ember/-internals/environment/lib/**',
+            '@ember/-internals/glimmer/index.js',
+            '@ember/-internals/glimmer/lib/**',
+            '@ember/-internals/metal/index.js',
+            '@ember/-internals/metal/lib/**',
+            '@ember/-internals/utils/index.js',
+            '@ember/-internals/utils/lib/**',
+          ],
+        }),
+        rollupPackage(packages, '@ember/-internals/browser-environment'),
+        rollupPackage(packages, '@ember/-internals/environment'),
+        rollupPackage(packages, '@ember/-internals/glimmer'),
+        rollupPackage(packages, '@ember/-internals/metal'),
+        rollupPackage(packages, '@ember/-internals/utils'),
+        rollupPackage(packages, '@ember/-internals/container'),
+      ]),
+      'packages:rollup'
+    );
   }
 
-  let dist = new MergeTrees([
-    new Funnel(packages, {
-      destDir: 'packages',
-      exclude: [
-        '**/package.json',
-        '@ember/-internals/*/tests/**' /* internal packages */,
-        '*/*/tests/**' /* scoped packages */,
-        '*/tests/**' /* packages */,
-        'ember-template-compiler/**',
-        'internal-test-helpers/**',
-      ],
-    }),
-    new Funnel(emberHeaderFiles(), { destDir: 'header' }),
-    new Funnel(emberDependencies(ENV), { destDir: 'dependencies' }),
-  ]);
-
-  // Test builds, tests, and test harness
-  let testFiles = new Funnel(
-    new MergeTrees([emberBundles(dist), testsBundle(packages, ENV, transpileTree), testHarness()]),
-    {
-      destDir: 'tests',
-    }
+  let dist = debugTree(
+    new MergeTrees([
+      new Funnel(packages, {
+        destDir: 'packages',
+        exclude: [
+          '**/package.json',
+          '@ember/-internals/*/tests/**' /* internal packages */,
+          '*/*/tests/**' /* scoped packages */,
+          '*/tests/**' /* packages */,
+          '@ember/-internals/*/type-tests/**' /* internal packages */,
+          '*/*/type-tests/**' /* scoped packages */,
+          '*/type-tests/**' /* packages */,
+          'ember-template-compiler/**',
+          'internal-test-helpers/**',
+        ],
+      }),
+      new Funnel(emberHeaderFiles(), { destDir: 'header' }),
+      new Funnel(emberDependencies(ENV), { destDir: 'dependencies' }),
+    ]),
+    'dist'
   );
 
-  let preBuilt = new Funnel(emberBundles(dist, false, { targets: modernBrowsers, loose: false }), {
-    getDestinationPath(path) {
-      return path.replace('ember.', 'ember.debug.');
-    },
-  });
+  // Test builds, tests, and test harness
+  let testFiles = debugTree(
+    new Funnel(
+      new MergeTrees([
+        emberBundles(dist),
+        testsBundle(packages, ENV, transpileTree),
+        testHarness(),
+      ]),
+      {
+        destDir: 'tests',
+      }
+    ),
+    'testFiles'
+  );
+
+  let preBuilt = debugTree(
+    new Funnel(emberBundles(dist, false, { targets: modernBrowsers, loose: false }), {
+      getDestinationPath(path) {
+        return path.replace('ember.', 'ember.debug.');
+      },
+    }),
+    'preBuilt'
+  );
 
   if (SHOULD_MINIFY) {
     preBuilt = minify(preBuilt);
@@ -142,7 +167,7 @@ module.exports = function({ project }) {
 
     // Pre-built bundles
     preBuilt,
-    templateCompilerBundle(packages, transpileTree),
+    debugTree(templateCompilerBundle(packages, transpileTree), 'template-compiler'),
 
     testFiles,
   ]);
@@ -150,14 +175,17 @@ module.exports = function({ project }) {
 
 function emberDependencies(environment) {
   // generate "loose" ES<latest> modules...
-  return new MergeTrees([
-    backburnerES(),
-    rsvpES(),
-    dagES(),
-    routerES(),
-    routeRecognizerES(),
-    glimmerES(environment),
-  ]);
+  return debugTree(
+    new MergeTrees([
+      backburnerES(),
+      rsvpES(),
+      dagES(),
+      routerES(),
+      routeRecognizerES(),
+      glimmerES(environment),
+    ]),
+    'dependencies'
+  );
 }
 
 function testsBundle(emberPackages, env, transpileTree) {
@@ -221,7 +249,14 @@ function templateCompilerBundle(emberPackages, transpileTree) {
 }
 
 function testHarness() {
-  return new MergeTrees([emptyTestem(), testPolyfills(), testIndexHTML(), qunit(), jquery()]);
+  return new MergeTrees([
+    emptyTestem(),
+    testPolyfills(),
+    testIndexHTML(),
+    loader(),
+    qunit(),
+    jquery(),
+  ]);
 }
 
 function emptyTestem() {
@@ -237,5 +272,5 @@ function templateCompilerDependencies() {
 }
 
 function emberHeaderFiles() {
-  return new MergeTrees([emberLicense(), internalLoader()]);
+  return new MergeTrees([emberLicense(), loader()]);
 }

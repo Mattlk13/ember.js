@@ -1,64 +1,14 @@
 /**
 @module ember
 */
-import { OwnedTemplateMeta } from '@ember/-internals/views';
+import { Owner } from '@ember/-internals/owner';
 import { assert } from '@ember/debug';
 import { DEBUG } from '@glimmer/env';
-import { Option } from '@glimmer/interfaces';
-import { OpcodeBuilder } from '@glimmer/opcode-compiler';
-import { Tag, VersionedPathReference } from '@glimmer/reference';
-import {
-  Arguments,
-  CapturedArguments,
-  CurriedComponentDefinition,
-  curry,
-  EMPTY_ARGS,
-  UNDEFINED_REFERENCE,
-  VM,
-} from '@glimmer/runtime';
-import * as WireFormat from '@glimmer/wire-format';
-import { MODEL_ARG_NAME, MountDefinition } from '../component-managers/mount';
-import Environment from '../environment';
-
-export function mountHelper(
-  vm: VM,
-  args: Arguments
-): VersionedPathReference<CurriedComponentDefinition | null> {
-  let env = vm.env as Environment;
-  let nameRef = args.positional.at(0);
-  let captured: Option<CapturedArguments> = null;
-
-  // TODO: the functionailty to create a proper CapturedArgument should be
-  // exported by glimmer, or that it should provide an overload for `curry`
-  // that takes `PreparedArguments`
-  if (args.named.has('model')) {
-    assert('[BUG] this should already be checked by the macro', args.named.length === 1);
-
-    let named = args.named.capture();
-    let { tag } = named;
-
-    // TODO delete me after EMBER_ROUTING_MODEL_ARG has shipped
-    if (DEBUG && MODEL_ARG_NAME !== 'model') {
-      assert('[BUG] named._map is not null', named['_map'] === null);
-      named.names = [MODEL_ARG_NAME];
-    }
-
-    captured = {
-      tag,
-      positional: EMPTY_ARGS.positional,
-      named,
-      length: 1,
-      value() {
-        return {
-          named: this.named.value(),
-          positional: this.positional.value(),
-        };
-      },
-    };
-  }
-
-  return new DynamicEngineReference(nameRef, env, captured);
-}
+import { CapturedArguments, CurriedType, Option } from '@glimmer/interfaces';
+import { createComputeRef, Reference, valueForRef } from '@glimmer/reference';
+import { createCapturedArgs, CurriedValue, curry, EMPTY_POSITIONAL } from '@glimmer/runtime';
+import { MountDefinition } from '../component-managers/mount';
+import { internalHelper } from '../helpers/internal-helper';
 
 /**
   The `{{mount}}` helper lets you embed a routeless engine in a template.
@@ -100,81 +50,59 @@ export function mountHelper(
   @for Ember.Templates.helpers
   @public
 */
-export function mountMacro(
-  _name: string,
-  params: Option<WireFormat.Core.Params>,
-  hash: Option<WireFormat.Core.Hash>,
-  builder: OpcodeBuilder<OwnedTemplateMeta>
-) {
-  assert(
-    'You can only pass a single positional argument to the {{mount}} helper, e.g. {{mount "chat-engine"}}.',
-    params!.length === 1
-  );
-
-  if (DEBUG && hash) {
-    let keys = hash[0];
-    let extra = keys.filter(k => k !== 'model');
+export const mountHelper = internalHelper(
+  (args: CapturedArguments, owner?: Owner): Reference<CurriedValue | null> => {
+    assert('{{mount}} must be used within a component that has an owner', owner);
+    let nameRef = args.positional[0] as Reference<Option<string>>;
+    let captured: CapturedArguments | null;
 
     assert(
-      'You can only pass a `model` argument to the {{mount}} helper, ' +
-        'e.g. {{mount "profile-engine" model=this.profile}}. ' +
-        `You passed ${extra.join(',')}.`,
-      extra.length === 0
+      'You can only pass a single positional argument to the {{mount}} helper, e.g. {{mount "chat-engine"}}.',
+      args.positional.length === 1
     );
-  }
 
-  let expr: WireFormat.Expressions.Helper = [WireFormat.Ops.Helper, '-mount', params || [], hash];
-  builder.dynamicComponent(expr, null, [], null, false, null, null);
-  return true;
-}
-
-class DynamicEngineReference implements VersionedPathReference<Option<CurriedComponentDefinition>> {
-  public tag: Tag;
-  private _lastName: Option<string> = null;
-  private _lastDef: Option<CurriedComponentDefinition> = null;
-
-  constructor(
-    public nameRef: VersionedPathReference<any | undefined | null>,
-    public env: Environment,
-    public args: Option<CapturedArguments>
-  ) {
-    this.tag = nameRef.tag;
-  }
-
-  value(): Option<CurriedComponentDefinition> {
-    let { env, nameRef, args } = this;
-    let name = nameRef.value();
-
-    if (typeof name === 'string') {
-      if (this._lastName === name) {
-        return this._lastDef;
-      }
+    if (DEBUG && args.named) {
+      let keys = Object.keys(args.named);
+      let extra = keys.filter((k) => k !== 'model');
 
       assert(
-        `You used \`{{mount '${name}'}}\`, but the engine '${name}' can not be found.`,
-        env.owner.hasRegistration(`engine:${name}`)
+        'You can only pass a `model` argument to the {{mount}} helper, ' +
+          'e.g. {{mount "profile-engine" model=this.profile}}. ' +
+          `You passed ${extra.join(',')}.`,
+        extra.length === 0
       );
+    }
 
-      if (!env.owner.hasRegistration(`engine:${name}`)) {
+    captured = createCapturedArgs(args.named, EMPTY_POSITIONAL);
+
+    let lastName: string | null, lastDef: CurriedValue | null;
+
+    return createComputeRef(() => {
+      let name = valueForRef(nameRef);
+
+      if (typeof name === 'string') {
+        if (lastName === name) {
+          return lastDef;
+        }
+
+        assert(
+          `You used \`{{mount '${name}'}}\`, but the engine '${name}' can not be found.`,
+          (owner as Owner).hasRegistration(`engine:${name}`)
+        );
+
+        lastName = name;
+        lastDef = curry(CurriedType.Component, new MountDefinition(name), owner, captured, true);
+
+        return lastDef;
+      } else {
+        assert(
+          `Invalid engine name '${name}' specified, engine name must be either a string, null or undefined.`,
+          name === null || name === undefined
+        );
+        lastDef = null;
+        lastName = null;
         return null;
       }
-
-      this._lastName = name;
-      this._lastDef = curry(new MountDefinition(name), args);
-
-      return this._lastDef;
-    } else {
-      assert(
-        `Invalid engine name '${name}' specified, engine name must be either a string, null or undefined.`,
-        name === null || name === undefined
-      );
-      this._lastDef = null;
-      this._lastName = null;
-      return null;
-    }
+    });
   }
-
-  get() {
-    return UNDEFINED_REFERENCE;
-  }
-}
+);

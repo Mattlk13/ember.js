@@ -1,7 +1,9 @@
 import { deprecate } from '@ember/debug';
 import { SEND_ACTION } from '@ember/deprecated-features';
-import { AST, ASTPlugin, ASTPluginEnvironment } from '@glimmer/syntax';
+import { AST, ASTPlugin } from '@glimmer/syntax';
 import calculateLocationDisplay from '../system/calculate-location-display';
+import { EmberASTPluginEnvironment } from '../types';
+import { isPath } from './utils';
 
 const EVENTS = [
   'insert-newline',
@@ -14,9 +16,9 @@ const EVENTS = [
   'key-down',
 ];
 
-export default function deprecateSendAction(env: ASTPluginEnvironment): ASTPlugin | undefined {
+export default function deprecateSendAction(env: EmberASTPluginEnvironment): ASTPlugin {
   if (SEND_ACTION) {
-    let { moduleName } = env.meta;
+    let moduleName = env.meta?.moduleName;
 
     let deprecationMessage = (node: AST.Node, eventName: string, actionName: string) => {
       let sourceInformation = calculateLocationDisplay(moduleName, node.loc);
@@ -46,7 +48,11 @@ export default function deprecateSendAction(env: ASTPluginEnvironment): ASTPlugi
                   deprecate(deprecationMessage(node, eventName, value.chars), false, {
                     id: 'ember-component.send-action',
                     until: '4.0.0',
-                    url: 'https://emberjs.com/deprecations/v3.x#toc_ember-component-send-action',
+                    url: 'https://deprecations.emberjs.com/v3.x#toc_ember-component-send-action',
+                    for: 'ember-source',
+                    since: {
+                      enabled: '3.4.0',
+                    },
                   });
                 } else if (
                   value.type === 'MustacheStatement' &&
@@ -55,7 +61,11 @@ export default function deprecateSendAction(env: ASTPluginEnvironment): ASTPlugi
                   deprecate(deprecationMessage(node, eventName, value.path.original), false, {
                     id: 'ember-component.send-action',
                     until: '4.0.0',
-                    url: 'https://emberjs.com/deprecations/v3.x#toc_ember-component-send-action',
+                    url: 'https://deprecations.emberjs.com/v3.x#toc_ember-component-send-action',
+                    for: 'ember-source',
+                    since: {
+                      enabled: '3.4.0',
+                    },
                   });
                 }
               }
@@ -64,16 +74,20 @@ export default function deprecateSendAction(env: ASTPluginEnvironment): ASTPlugi
         },
 
         MustacheStatement(node: AST.MustacheStatement) {
-          if (node.path.original !== 'input') {
+          if (!isPath(node.path) || node.path.original !== 'input') {
             return;
           }
 
-          node.hash.pairs.forEach(pair => {
+          node.hash.pairs.forEach((pair) => {
             if (EVENTS.indexOf(pair.key) > -1 && pair.value.type === 'StringLiteral') {
               deprecate(deprecationMessage(node, pair.key, pair.value.original), false, {
                 id: 'ember-component.send-action',
                 until: '4.0.0',
-                url: 'https://emberjs.com/deprecations/v3.x#toc_ember-component-send-action',
+                url: 'https://deprecations.emberjs.com/v3.x#toc_ember-component-send-action',
+                for: 'ember-source',
+                since: {
+                  enabled: '3.4.0',
+                },
               });
             }
           });
@@ -81,5 +95,9 @@ export default function deprecateSendAction(env: ASTPluginEnvironment): ASTPlugi
       },
     };
   }
-  return;
+
+  return {
+    name: 'deprecate-send-action',
+    visitor: {},
+  };
 }

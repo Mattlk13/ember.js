@@ -10,18 +10,34 @@ import {
   addArrayObserver,
   removeArrayObserver,
   replace,
-  getChainTagsForKey,
+  arrayContentDidChange,
+  tagForProperty,
 } from '@ember/-internals/metal';
-import { EMBER_METAL_TRACKED_PROPERTIES } from '@ember/canary-features';
+import { isObject } from '@ember/-internals/utils';
 import EmberObject from './object';
 import { isArray, MutableArray } from '../mixins/array';
 import { assert } from '@ember/debug';
-import { combine, validate, value } from '@glimmer/reference';
+import { setCustomTagFor } from '@glimmer/manager';
+import { combine, consumeTag, validateTag, valueForTag, tagFor } from '@glimmer/validator';
 
 const ARRAY_OBSERVER_MAPPING = {
   willChange: '_arrangedContentArrayWillChange',
   didChange: '_arrangedContentArrayDidChange',
 };
+
+function customTagForArrayProxy(proxy, key) {
+  if (key === '[]') {
+    proxy._revalidate();
+
+    return proxy._arrTag;
+  } else if (key === 'length') {
+    proxy._revalidate();
+
+    return proxy._lengthTag;
+  }
+
+  return tagFor(proxy, key);
+}
 
 /**
   An ArrayProxy wraps any other object that implements `Array` and/or
@@ -104,18 +120,21 @@ export default class ArrayProxy extends EmberObject {
     this._length = 0;
 
     this._arrangedContent = null;
+    this._arrangedContentIsUpdating = false;
+    this._arrangedContentTag = null;
+    this._arrangedContentRevision = null;
+    this._lengthTag = null;
+    this._arrTag = null;
 
-    if (EMBER_METAL_TRACKED_PROPERTIES) {
-      this._arrangedContentIsUpdating = false;
-      this._arrangedContentTag = combine(getChainTagsForKey(this, 'arrangedContent'));
-      this._arrangedContentRevision = value(this._arrangedContentTag);
-    }
+    setCustomTagFor(this, customTagForArrayProxy);
+  }
 
-    this._addArrangedContentArrayObsever();
+  [PROPERTY_DID_CHANGE]() {
+    this._revalidate();
   }
 
   willDestroy() {
-    this._removeArrangedContentArrayObsever();
+    this._removeArrangedContentArrayObserver();
   }
 
   /**
@@ -174,9 +193,7 @@ export default class ArrayProxy extends EmberObject {
 
   // Overriding objectAt is not supported.
   objectAt(idx) {
-    if (EMBER_METAL_TRACKED_PROPERTIES) {
-      this._revalidate();
-    }
+    this._revalidate();
 
     if (this._objects === null) {
       this._objects = [];
@@ -201,15 +218,15 @@ export default class ArrayProxy extends EmberObject {
 
   // Overriding length is not supported.
   get length() {
-    if (EMBER_METAL_TRACKED_PROPERTIES) {
-      this._revalidate();
-    }
+    this._revalidate();
 
     if (this._lengthDirty) {
       let arrangedContent = get(this, 'arrangedContent');
       this._length = arrangedContent ? get(arrangedContent, 'length') : 0;
       this._lengthDirty = false;
     }
+
+    consumeTag(this._lengthTag);
 
     return this._length;
   }
@@ -234,34 +251,20 @@ export default class ArrayProxy extends EmberObject {
     }
   }
 
-  [PROPERTY_DID_CHANGE](key) {
-    if (EMBER_METAL_TRACKED_PROPERTIES) {
-      this._revalidate();
-    } else {
-      if (key === 'arrangedContent') {
-        this._updateArrangedContentArray();
-      } else if (key === 'content') {
-        this._invalidate();
-      }
-    }
-  }
-
-  _updateArrangedContentArray() {
+  _updateArrangedContentArray(arrangedContent) {
     let oldLength = this._objects === null ? 0 : this._objects.length;
-    let arrangedContent = get(this, 'arrangedContent');
     let newLength = arrangedContent ? get(arrangedContent, 'length') : 0;
 
-    this._removeArrangedContentArrayObsever();
+    this._removeArrangedContentArrayObserver();
     this.arrayContentWillChange(0, oldLength, newLength);
 
     this._invalidate();
 
     this.arrayContentDidChange(0, oldLength, newLength);
-    this._addArrangedContentArrayObsever();
+    this._addArrangedContentArrayObserver(arrangedContent);
   }
 
-  _addArrangedContentArrayObsever() {
-    let arrangedContent = get(this, 'arrangedContent');
+  _addArrangedContentArrayObserver(arrangedContent) {
     if (arrangedContent && !arrangedContent.isDestroyed) {
       assert("Can't set ArrayProxy's content to itself", arrangedContent !== this);
       assert(
@@ -269,15 +272,15 @@ export default class ArrayProxy extends EmberObject {
         isArray(arrangedContent) || arrangedContent.isDestroyed
       );
 
-      addArrayObserver(arrangedContent, this, ARRAY_OBSERVER_MAPPING);
+      addArrayObserver(arrangedContent, this, ARRAY_OBSERVER_MAPPING, true);
 
       this._arrangedContent = arrangedContent;
     }
   }
 
-  _removeArrangedContentArrayObsever() {
+  _removeArrangedContentArrayObserver() {
     if (this._arrangedContent) {
-      removeArrayObserver(this._arrangedContent, this, ARRAY_OBSERVER_MAPPING);
+      removeArrayObserver(this._arrangedContent, this, ARRAY_OBSERVER_MAPPING, true);
     }
   }
 
@@ -305,24 +308,37 @@ export default class ArrayProxy extends EmberObject {
     this._objectsDirtyIndex = 0;
     this._lengthDirty = true;
   }
-}
 
-let _revalidate;
+  _revalidate() {
+    if (this._arrangedContentIsUpdating === true) return;
 
-if (EMBER_METAL_TRACKED_PROPERTIES) {
-  _revalidate = function() {
     if (
-      !this._arrangedContentIsUpdating &&
-      !validate(this._arrangedContentTag, this._arrangedContentRevision)
+      this._arrangedContentTag === null ||
+      !validateTag(this._arrangedContentTag, this._arrangedContentRevision)
     ) {
-      this._arrangedContentIsUpdating = true;
-      this._updateArrangedContentArray();
-      this._arrangedContentIsUpdating = false;
+      let arrangedContent = this.get('arrangedContent');
 
-      this._arrangedContentTag = combine(getChainTagsForKey(this, 'arrangedContent'));
-      this._arrangedContentRevision = value(this._arrangedContentTag);
+      if (this._arrangedContentTag === null) {
+        // This is the first time the proxy has been setup, only add the observer
+        // don't trigger any events
+        this._addArrangedContentArrayObserver(arrangedContent);
+      } else {
+        this._arrangedContentIsUpdating = true;
+        this._updateArrangedContentArray(arrangedContent);
+        this._arrangedContentIsUpdating = false;
+      }
+
+      let arrangedContentTag = (this._arrangedContentTag = tagFor(this, 'arrangedContent'));
+      this._arrangedContentRevision = valueForTag(this._arrangedContentTag);
+
+      if (isObject(arrangedContent)) {
+        this._lengthTag = combine([arrangedContentTag, tagForProperty(arrangedContent, 'length')]);
+        this._arrTag = combine([arrangedContentTag, tagForProperty(arrangedContent, '[]')]);
+      } else {
+        this._lengthTag = this._arrTag = arrangedContentTag;
+      }
     }
-  };
+  }
 }
 
 ArrayProxy.reopen(MutableArray, {
@@ -336,5 +352,9 @@ ArrayProxy.reopen(MutableArray, {
   */
   arrangedContent: alias('content'),
 
-  _revalidate,
+  // Array proxies don't need to notify when they change since their `[]` tag is
+  // already dependent on the `[]` tag of `arrangedContent`
+  arrayContentDidChange(startIdx, removeAmt, addAmt) {
+    return arrayContentDidChange(this, startIdx, removeAmt, addAmt, false);
+  },
 });

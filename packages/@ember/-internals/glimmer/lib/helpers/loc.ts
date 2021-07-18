@@ -36,7 +36,8 @@ import { helper } from '../helper';
   @param {String} str The string to format.
   @see {String#loc}
   @public
+  @deprecated
 */
-export default helper(function(params) {
+export default helper(function (params) {
   return loc.apply(null, params as any /* let the other side handle errors */);
 });

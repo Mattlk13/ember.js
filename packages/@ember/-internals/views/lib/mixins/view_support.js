@@ -84,7 +84,9 @@ let mixin = {
   nearestOfType(klass) {
     let view = this.parentView;
     let isOfType =
-      klass instanceof Mixin ? view => klass.detect(view) : view => klass.detect(view.constructor);
+      klass instanceof Mixin
+        ? (view) => klass.detect(view)
+        : (view) => klass.detect(view.constructor);
 
     while (view) {
       if (isOfType(view)) {
@@ -447,7 +449,11 @@ if (JQUERY_INTEGRATION) {
       {
         id: 'ember-views.curly-components.jquery-element',
         until: '4.0.0',
-        url: 'https://emberjs.com/deprecations/v3.x#toc_jquery-apis',
+        url: 'https://deprecations.emberjs.com/v3.x#toc_jquery-apis',
+        for: 'ember-source',
+        since: {
+          enabled: '3.9.0',
+        },
       }
     );
     if (this.element) {

@@ -1,23 +1,18 @@
-import { assert } from '@ember/debug';
-import { AST, ASTPlugin, ASTPluginEnvironment } from '@glimmer/syntax';
+import { assert, deprecate } from '@ember/debug';
+import { AST, ASTPlugin } from '@glimmer/syntax';
 import calculateLocationDisplay from '../system/calculate-location-display';
+import { EmberASTPluginEnvironment } from '../types';
+import { isPath } from './utils';
 
 /**
  @module ember
 */
 
 /**
-  glimmer-vm has made the `in-element` API public from its perspective (in
-  https://github.com/glimmerjs/glimmer-vm/pull/619) so in glimmer-vm the
-  correct keyword to use is `in-element`, however Ember is still working through
-  its form of `in-element` (see https://github.com/emberjs/rfcs/pull/287).
+  A Glimmer2 AST transformation that handles the public `{{in-element}}` as per RFC287, and deprecates but still
+  continues support for the private `{{-in-element}}`.
 
-  There are enough usages of the pre-existing private API (`{{-in-element`) in
-  the wild that we need to transform `{{-in-element` into `{{in-element` during
-  template transpilation, but since RFC#287 is not landed and enabled by default we _also_ need
-  to prevent folks from starting to use `{{in-element` "for realz".
-
-  Tranforms:
+  Transforms:
 
   ```handlebars
   {{#-in-element someElement}}
@@ -33,60 +28,93 @@ import calculateLocationDisplay from '../system/calculate-location-display';
   {{/in-element}}
   ```
 
-  And issues a build time assertion for:
+  And issues a deprecation message.
+
+  Issues a build time assertion for:
 
   ```handlebars
-  {{#in-element someElement}}
+  {{#in-element someElement insertBefore="some-none-null-value"}}
     {{modal-display text=text}}
   {{/in-element}}
   ```
 
   @private
-  @class TransformHasBlockSyntax
+  @class TransformInElement
 */
-export default function transformInElement(env: ASTPluginEnvironment): ASTPlugin {
-  let { moduleName } = env.meta;
+export default function transformInElement(env: EmberASTPluginEnvironment): ASTPlugin {
+  let moduleName = env.meta?.moduleName;
   let { builders: b } = env.syntax;
-  let cursorCount = 0;
 
   return {
     name: 'transform-in-element',
 
     visitor: {
       BlockStatement(node: AST.BlockStatement) {
+        if (!isPath(node.path)) return;
+
         if (node.path.original === 'in-element') {
-          assert(assertMessage(moduleName, node));
+          let originalValue = node.params[0];
+
+          if (originalValue && !env.isProduction) {
+            let subExpr = b.sexpr('-in-el-null', [originalValue]);
+
+            node.params.shift();
+            node.params.unshift(subExpr);
+          }
+
+          node.hash.pairs.forEach((pair) => {
+            if (pair.key === 'insertBefore') {
+              assert(
+                `Can only pass null to insertBefore in in-element, received: ${JSON.stringify(
+                  pair.value
+                )}`,
+                pair.value.type === 'NullLiteral' || pair.value.type === 'UndefinedLiteral'
+              );
+            }
+          });
         } else if (node.path.original === '-in-element') {
+          let sourceInformation = calculateLocationDisplay(moduleName, node.loc);
+          deprecate(
+            `The use of the private \`{{-in-element}}\` is deprecated, please refactor to the public \`{{in-element}}\`. ${sourceInformation}`,
+            false,
+            {
+              id: 'glimmer.private-in-element',
+              until: '3.25.0',
+              for: 'ember-source',
+              since: {
+                enabled: '3.20.0',
+              },
+            }
+          );
+
           node.path.original = 'in-element';
           node.path.parts = ['in-element'];
 
           // replicate special hash arguments added here:
           // https://github.com/glimmerjs/glimmer-vm/blob/ba9b37d44b85fa1385eeeea71910ff5798198c8e/packages/%40glimmer/syntax/lib/parser/handlebars-node-visitors.ts#L340-L363
-          let hasNextSibling = false;
+          let needsInsertBefore = true;
           let hash = node.hash;
-          hash.pairs.forEach(pair => {
-            if (pair.key === 'nextSibling') {
-              hasNextSibling = true;
+          hash.pairs.forEach((pair) => {
+            if (pair.key === 'insertBefore') {
+              assert(
+                `Can only pass a null or undefined literals to insertBefore in -in-element, received: ${JSON.stringify(
+                  pair.value
+                )}`,
+                pair.value.type === 'NullLiteral' || pair.value.type === 'UndefinedLiteral'
+              );
+
+              needsInsertBefore = false;
             }
           });
 
-          let guid = b.literal('StringLiteral', `%cursor:${cursorCount++}%`);
-          let guidPair = b.pair('guid', guid);
-          hash.pairs.unshift(guidPair);
-
-          if (!hasNextSibling) {
+          // Maintain compatibility with previous -in-element behavior (defaults to append, not clear)
+          if (needsInsertBefore) {
             let nullLiteral = b.literal('NullLiteral', null);
-            let nextSibling = b.pair('nextSibling', nullLiteral);
+            let nextSibling = b.pair('insertBefore', nullLiteral);
             hash.pairs.push(nextSibling);
           }
         }
       },
     },
   };
-}
-
-function assertMessage(moduleName: string, node: AST.BlockStatement) {
-  let sourceInformation = calculateLocationDisplay(moduleName, node.loc);
-
-  return `The {{in-element}} helper cannot be used. ${sourceInformation}`;
 }

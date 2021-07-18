@@ -3,13 +3,19 @@
 */
 
 import { get, set, Mixin } from '@ember/-internals/metal';
-import { TargetActionSupport } from '@ember/-internals/runtime';
+import { EMBER_MODERNIZED_BUILT_IN_COMPONENTS } from '@ember/canary-features';
 import { deprecate } from '@ember/debug';
 import { SEND_ACTION } from '@ember/deprecated-features';
+import { MUTABLE_CELL } from '@ember/-internals/views';
+import { DEBUG } from '@glimmer/env';
+
+if (DEBUG && EMBER_MODERNIZED_BUILT_IN_COMPONENTS) {
+  Mixin._disableDebugSeal = true;
+}
 
 const KEY_EVENTS = {
-  13: 'insertNewline',
-  27: 'cancel',
+  Enter: 'insertNewline',
+  Escape: 'cancel',
 };
 
 /**
@@ -112,7 +118,7 @@ const KEY_EVENTS = {
   @extends Mixin
   @private
 */
-export default Mixin.create(TargetActionSupport, {
+const TextSupport = Mixin.create({
   value: '',
 
   attributeBindings: [
@@ -135,13 +141,6 @@ export default Mixin.create(TargetActionSupport, {
   disabled: false,
   maxlength: null,
 
-  init() {
-    this._super(...arguments);
-    this.on('paste', this, this._elementValueDidChange);
-    this.on('cut', this, this._elementValueDidChange);
-    this.on('input', this, this._elementValueDidChange);
-  },
-
   /**
     Whether the `keyUp` event that triggers an `action` to be sent continues
     propagating to other views.
@@ -161,8 +160,7 @@ export default Mixin.create(TargetActionSupport, {
   bubbles: false,
 
   interpretKeyEvents(event) {
-    let map = KEY_EVENTS;
-    let method = map[event.keyCode];
+    let method = KEY_EVENTS[event.key];
 
     this._elementValueDidChange();
     if (method) {
@@ -175,6 +173,18 @@ export default Mixin.create(TargetActionSupport, {
   },
 
   change(event) {
+    this._elementValueDidChange(event);
+  },
+
+  paste(event) {
+    this._elementValueDidChange(event);
+  },
+
+  cut(event) {
+    this._elementValueDidChange(event);
+  },
+
+  input(event) {
     this._elementValueDidChange(event);
   },
 
@@ -306,27 +316,78 @@ export default Mixin.create(TargetActionSupport, {
 // sendAction semantics for TextField are different from
 // the component semantics so this method normalizes them.
 function sendAction(eventName, view, event) {
-  let actionName = get(view, `attrs.${eventName}`) || get(view, eventName);
+  let action = get(view, `attrs.${eventName}`);
+  if (action !== null && typeof action === 'object' && action[MUTABLE_CELL] === true) {
+    action = action.value;
+  }
+
+  if (action === undefined) {
+    action = get(view, eventName);
+  }
+
   let value = get(view, 'value');
 
-  if (SEND_ACTION && typeof actionName === 'string') {
-    let message = `Passing actions to components as strings (like \`<Input @${eventName}="${actionName}" />\`) is deprecated. Please use closure actions instead (\`<Input @${eventName}={{action "${actionName}"}} />\`).`;
+  if (SEND_ACTION && typeof action === 'string') {
+    let message = `Passing actions to components as strings (like \`<Input @${eventName}="${action}" />\`) is deprecated. Please use closure actions instead (\`<Input @${eventName}={{action "${action}"}} />\`).`;
 
     deprecate(message, false, {
       id: 'ember-component.send-action',
       until: '4.0.0',
-      url: 'https://emberjs.com/deprecations/v3.x#toc_ember-component-send-action',
+      url: 'https://deprecations.emberjs.com/v3.x#toc_ember-component-send-action',
+      for: 'ember-source',
+      since: {
+        enabled: '3.4.0',
+      },
     });
 
     view.triggerAction({
-      action: actionName,
+      action: action,
       actionContext: [value, event],
     });
-  } else if (typeof actionName === 'function') {
-    actionName(value, event);
+  } else if (typeof action === 'function') {
+    action(value, event);
   }
 
-  if (actionName && !get(view, 'bubbles')) {
+  if (action && !get(view, 'bubbles')) {
     event.stopPropagation();
   }
 }
+
+if (EMBER_MODERNIZED_BUILT_IN_COMPONENTS) {
+  Object.defineProperty(TextSupport, '_wasReopened', {
+    configurable: true,
+    enumerable: false,
+    writable: true,
+    value: false,
+  });
+
+  Object.defineProperty(TextSupport, 'reopen', {
+    configurable: true,
+    enumerable: false,
+    writable: true,
+    value: function reopen(...args) {
+      if (this === TextSupport) {
+        deprecate('Reopening Ember.TextSupport is deprecated.', false, {
+          id: 'ember.built-in-components.reopen',
+          for: 'ember-source',
+          since: {
+            enabled: '3.27.0',
+          },
+          until: '4.0.0',
+          url: 'https://deprecations.emberjs.com/v3.x#toc_ember-built-in-components-reopen',
+        });
+
+        TextSupport._wasReopened = true;
+      }
+
+      return Mixin.prototype.reopen.call(this, ...args);
+    },
+  });
+
+  if (DEBUG) {
+    Object.seal(TextSupport);
+    Mixin._disableDebugSeal = false;
+  }
+}
+
+export default TextSupport;

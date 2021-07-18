@@ -1,5 +1,4 @@
 import { run } from '@ember/runloop';
-import { assign } from '@ember/polyfills';
 import isFormControl from './helpers/-is-form-control';
 
 const DEFAULT_EVENT_OPTIONS = { canBubble: true, cancelable: true };
@@ -23,7 +22,7 @@ export function focus(el) {
   if (el.isContentEditable || isFormControl(el)) {
     let type = el.getAttribute('type');
     if (type !== 'checkbox' && type !== 'radio' && type !== 'hidden') {
-      run(null, function() {
+      run(null, function () {
         let browserIsNotFocused = document.hasFocus && !document.hasFocus();
 
         // makes `document.activeElement` be `element`. If the browser is focused, it also fires a focus event
@@ -62,7 +61,7 @@ export function fireEvent(element, type, options = {}) {
       clientX: x,
       clientY: y,
     };
-    event = buildMouseEvent(type, assign(simulatedCoordinates, options));
+    event = buildMouseEvent(type, Object.assign(simulatedCoordinates, options));
   } else {
     event = buildBasicEvent(type, options);
   }
@@ -80,7 +79,7 @@ function buildBasicEvent(type, options = {}) {
   delete options.cancelable;
 
   event.initEvent(type, bubbles, cancelable);
-  assign(event, options);
+  Object.assign(event, options);
   return event;
 }
 
@@ -88,7 +87,7 @@ function buildMouseEvent(type, options = {}) {
   let event;
   try {
     event = document.createEvent('MouseEvents');
-    let eventOpts = assign({}, DEFAULT_EVENT_OPTIONS, options);
+    let eventOpts = Object.assign({}, DEFAULT_EVENT_OPTIONS, options);
     event.initMouseEvent(
       type,
       eventOpts.canBubble,
@@ -116,7 +115,7 @@ function buildKeyboardEvent(type, options = {}) {
   let event;
   try {
     event = document.createEvent('KeyEvents');
-    let eventOpts = assign({}, DEFAULT_EVENT_OPTIONS, options);
+    let eventOpts = Object.assign({}, DEFAULT_EVENT_OPTIONS, options);
     event.initKeyEvent(
       type,
       eventOpts.canBubble,

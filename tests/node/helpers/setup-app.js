@@ -1,10 +1,7 @@
 /* eslint-disable no-console */
 
-const path = require('path');
-const distPath = path.join(__dirname, '../../../dist');
-const emberPath = path.join(distPath, 'tests/ember');
-const templateCompilerPath = path.join(distPath, 'ember-template-compiler');
 const SimpleDOM = require('simple-dom');
+const { loadEmber, clearEmber } = require('./load-ember');
 
 /*
  * This helper sets up a QUnit test module with all of the environment and
@@ -58,19 +55,14 @@ const SimpleDOM = require('simple-dom');
  *     });
  */
 
-module.exports = function(hooks) {
-  hooks.beforeEach(function() {
-    let Ember = (this.Ember = require(emberPath));
+module.exports = function (hooks) {
+  hooks.beforeEach(function () {
+    let { Ember, compile } = loadEmber();
+
+    this.Ember = Ember;
+    this.compile = compile;
 
     Ember.testing = true;
-
-    let precompile = require(templateCompilerPath).precompile;
-    this.compile = function(templateString, options) {
-      let templateSpec = precompile(templateString, options);
-      let template = new Function('return ' + templateSpec)();
-
-      return Ember.HTMLBars.template(template);
-    };
 
     this.run = Ember.run;
     this.all = Ember.RSVP.all;
@@ -88,14 +80,10 @@ module.exports = function(hooks) {
     this.renderToHTML = renderToHTML;
   });
 
-  hooks.afterEach(function() {
+  hooks.afterEach(function () {
     this.run(this.app, 'destroy');
 
-    delete global.Ember;
-
-    // clear the previously cached version of this module
-    delete require.cache[emberPath + '.js'];
-    delete require.cache[templateCompilerPath + '.js'];
+    clearEmber();
   });
 };
 
@@ -136,7 +124,7 @@ function visit(url) {
     isBrowser: false,
     document: dom,
     rootElement: dom.body,
-  }).catch(function(error) {
+  }).catch(function (error) {
     console.error(error.stack);
   });
 }
@@ -150,7 +138,7 @@ function renderToHTML(url) {
     isBrowser: false,
     document: dom,
     rootElement: root,
-  }).then(function() {
+  }).then(function () {
     let serializer = new SimpleDOM.HTMLSerializer(SimpleDOM.voidMap);
     return serializer.serialize(root);
   });
@@ -159,7 +147,7 @@ function renderToHTML(url) {
 function registerApplicationClasses(app, registry) {
   app.initializer({
     name: 'register-application-classes',
-    initialize: function(app) {
+    initialize: function (app) {
       for (let key in registry) {
         app.register(key, registry[key]);
       }

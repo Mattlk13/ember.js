@@ -2,7 +2,6 @@
 @module @ember/application
 */
 
-import { assign } from '@ember/polyfills';
 import { get, set, computed } from '@ember/-internals/metal';
 import * as environment from '@ember/-internals/browser-environment';
 import { jQuery } from '@ember/-internals/views';
@@ -129,7 +128,7 @@ const ApplicationInstance = EngineInstance.extend({
     this.constructor.setupRegistry(this.__registry__, options);
   },
 
-  router: computed(function() {
+  router: computed(function () {
     return this.lookup('router:main');
   }).readOnly(),
 
@@ -159,24 +158,26 @@ const ApplicationInstance = EngineInstance.extend({
   */
   startRouting() {
     this.router.startRouting();
-    this._didSetupRouter = true;
   },
 
   /**
-    @private
-
     Sets up the router, initializing the child router and configuring the
     location before routing begins.
 
     Because setup should only occur once, multiple calls to `setupRouter`
     beyond the first call have no effect.
+
+    This is commonly used in order to confirm things that rely on the router
+    are functioning properly from tests that are primarily rendering related.
+
+    For example, from within [ember-qunit](https://github.com/emberjs/ember-qunit)'s
+    `setupRenderingTest` calling `this.owner.setupRouter()` would allow that
+    rendering test to confirm that any `<LinkTo></LinkTo>`'s that are rendered
+    have the correct URL.
+
+    @public
   */
   setupRouter() {
-    if (this._didSetupRouter) {
-      return;
-    }
-    this._didSetupRouter = true;
-
     this.router.setupRouter();
   },
 
@@ -200,7 +201,7 @@ const ApplicationInstance = EngineInstance.extend({
     let applicationCustomEvents = get(this.application, 'customEvents');
     let instanceCustomEvents = get(this, 'customEvents');
 
-    let customEvents = assign({}, applicationCustomEvents, instanceCustomEvents);
+    let customEvents = Object.assign({}, applicationCustomEvents, instanceCustomEvents);
     dispatcher.setup(customEvents, this.rootElement);
 
     return dispatcher;
@@ -248,7 +249,7 @@ const ApplicationInstance = EngineInstance.extend({
       }
     };
 
-    let handleTransitionReject = error => {
+    let handleTransitionReject = (error) => {
       if (error.error) {
         throw error.error;
       } else if (error.name === 'TransitionAborted' && router._routerMicrolib.activeTransition) {
@@ -496,7 +497,7 @@ class BootOptions {
 
   toEnvironment() {
     // Do we really want to assign all of this!?
-    let env = assign({}, environment);
+    let env = Object.assign({}, environment);
     // For compatibility with existing code
     env.hasDOM = this.isBrowser;
     env.isInteractive = this.isInteractive;

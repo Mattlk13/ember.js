@@ -4,7 +4,7 @@ import { deprecate } from '@ember/debug';
  @module @ember/polyfills
 */
 
-export default function merge<T, U>(original: T, updates: U): T & U;
+function merge<T, U>(original: T, updates: U): T & U;
 
 /**
   Merge the contents of two objects together into the first object.
@@ -27,11 +27,15 @@ export default function merge<T, U>(original: T, updates: U): T & U;
   @deprecated
   @public
 */
-export default function merge(original: object, updates: object) {
+function merge(original: object, updates: object) {
   deprecate('Use of `merge` has been deprecated. Please use `assign` instead.', false, {
     id: 'ember-polyfills.deprecate-merge',
     until: '4.0.0',
-    url: 'https://emberjs.com/deprecations/v3.x/#toc_ember-polyfills-deprecate-merge',
+    url: 'https://deprecations.emberjs.com/v3.x/#toc_ember-polyfills-deprecate-merge',
+    for: 'ember-source',
+    since: {
+      enabled: '3.6.0-beta.1',
+    },
   });
 
   if (updates === null || typeof updates !== 'object') {
@@ -48,3 +52,5 @@ export default function merge(original: object, updates: object) {
 
   return original;
 }
+
+export default merge;

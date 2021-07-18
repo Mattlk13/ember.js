@@ -2,7 +2,11 @@ import { context } from '@ember/-internals/environment';
 import { run } from '@ember/runloop';
 import { Object as EmberObject } from '@ember/-internals/runtime';
 import EmberApplication from '@ember/application';
-import { moduleFor, AbstractTestCase as TestCase } from 'internal-test-helpers';
+import {
+  moduleFor,
+  ModuleBasedTestResolver,
+  AbstractTestCase as TestCase,
+} from 'internal-test-helpers';
 
 let originalLookup = context.lookup;
 let registry, locator, application;
@@ -13,7 +17,9 @@ moduleFor(
     constructor() {
       super();
 
-      application = run(EmberApplication, 'create');
+      application = run(EmberApplication, 'create', {
+        Resolver: ModuleBasedTestResolver,
+      });
 
       application.Person = EmberObject.extend({});
       application.Orange = EmberObject.extend({});
@@ -48,16 +54,6 @@ moduleFor(
       context.lookup = originalLookup;
     }
 
-    ['@test container lookup is normalized'](assert) {
-      let dotNotationController = locator.lookup('controller:post.index');
-      let camelCaseController = locator.lookup('controller:postIndex');
-
-      assert.ok(dotNotationController instanceof application.PostIndexController);
-      assert.ok(camelCaseController instanceof application.PostIndexController);
-
-      assert.equal(dotNotationController, camelCaseController);
-    }
-
     ['@test registered entities can be looked up later'](assert) {
       assert.equal(registry.resolve('model:person'), application.Person);
       assert.equal(registry.resolve('model:user'), application.User);
@@ -77,6 +73,10 @@ moduleFor(
     }
 
     ['@test injections'](assert) {
+      expectDeprecation(
+        /A value was injected implicitly on the 'fruit' property of an instance of <.*>. Implicit injection is now deprecated, please add an explicit injection for this value/
+      );
+
       application.inject('model', 'fruit', 'fruit:favorite');
       application.inject('model:user', 'communication', 'communication:main');
 

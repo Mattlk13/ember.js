@@ -2,53 +2,50 @@
   @module @ember/object
 */
 
-import { FACTORY_FOR } from '@ember/-internals/container';
-import { getOwner } from '@ember/-internals/owner';
-import { assign, _WeakSet as WeakSet } from '@ember/polyfills';
+import { getFactoryFor, setFactoryFor, INIT_FACTORY } from '@ember/-internals/container';
+import { getOwner, LEGACY_OWNER } from '@ember/-internals/owner';
 import {
   guidFor,
-  getName,
-  setName,
-  symbol,
+  lookupDescriptor,
+  inspect,
   makeArray,
   HAS_NATIVE_PROXY,
+  HAS_NATIVE_SYMBOL,
   isInternalSymbol,
 } from '@ember/-internals/utils';
-import { EMBER_METAL_TRACKED_PROPERTIES } from '@ember/canary-features';
-import { schedule } from '@ember/runloop';
-import { meta, peekMeta, deleteMeta } from '@ember/-internals/meta';
+import { meta } from '@ember/-internals/meta';
 import {
   PROXY_CONTENT,
-  finishChains,
   sendEvent,
   Mixin,
   activateObserver,
   applyMixin,
   defineProperty,
   descriptorForProperty,
-  classToString,
   isClassicDecorator,
   DEBUG_INJECTION_FUNCTIONS,
+  TrackedDescriptor,
 } from '@ember/-internals/metal';
 import ActionHandler from '../mixins/action_handler';
-import { assert } from '@ember/debug';
+import { assert, deprecate } from '@ember/debug';
 import { DEBUG } from '@glimmer/env';
+import { _WeakSet as WeakSet } from '@glimmer/util';
+import { destroy, isDestroying, isDestroyed, registerDestructor } from '@glimmer/destroyable';
+import { OWNER } from '@glimmer/owner';
 
 const reopen = Mixin.prototype.reopen;
 
 const wasApplied = new WeakSet();
-
-const factoryMap = new WeakMap();
-
 const prototypeMixinMap = new WeakMap();
 
 const initCalled = DEBUG ? new WeakSet() : undefined; // only used in debug builds to enable the proxy trap
-const PASSED_FROM_CREATE = DEBUG ? symbol('PASSED_FROM_CREATE') : undefined;
 
-const FRAMEWORK_CLASSES = symbol('FRAMEWORK_CLASS');
+const destroyCalled = new Set();
 
-export function setFrameworkClass(klass) {
-  klass[FRAMEWORK_CLASSES] = true;
+function ensureDestroyCalled(instance) {
+  if (!destroyCalled.has(instance)) {
+    instance.destroy();
+  }
 }
 
 function initialize(obj, properties) {
@@ -65,6 +62,21 @@ function initialize(obj, properties) {
         'definitions, use .extend & .create separately instead.',
       !(properties instanceof Mixin)
     );
+
+    let injectedProperties;
+    if (DEBUG) {
+      // these are all the implicit injectinos
+      injectedProperties = [];
+
+      let factory = getFactoryFor(obj);
+      if (factory) {
+        for (let injection in factory.injections) {
+          if (factory.injections[injection] === properties[injection]) {
+            injectedProperties.push(injection);
+          }
+        }
+      }
+    }
 
     let concatenatedProperties = obj.concatenatedProperties;
     let mergedProperties = obj.mergedProperties;
@@ -98,9 +110,8 @@ function initialize(obj, properties) {
       let isDescriptor = possibleDesc !== undefined;
 
       if (!isDescriptor) {
-        let baseValue = obj[keyName];
-
         if (hasConcatenatedProps && concatenatedProperties.indexOf(keyName) > -1) {
+          let baseValue = obj[keyName];
           if (baseValue) {
             value = makeArray(baseValue).concat(value);
           } else {
@@ -109,17 +120,91 @@ function initialize(obj, properties) {
         }
 
         if (hasMergedProps && mergedProperties.indexOf(keyName) > -1) {
-          value = assign({}, baseValue, value);
+          let baseValue = obj[keyName];
+          value = Object.assign({}, baseValue, value);
         }
       }
 
       if (isDescriptor) {
+        if (DEBUG && injectedProperties.indexOf(keyName) !== -1) {
+          // need to check if implicit injection owner.inject('component:my-component', 'foo', 'service:bar') does not match explicit injection @service foo
+          // implicit injection takes precedence so need to tell user to rename property on obj
+          let isInjectedProperty = DEBUG_INJECTION_FUNCTIONS.has(possibleDesc._getter);
+          if (isInjectedProperty && value !== possibleDesc.get(obj, keyName)) {
+            implicitInjectionDeprecation(
+              keyName,
+              `You have explicitly defined a service injection for the '${keyName}' property on ${inspect(
+                obj
+              )}. However, a different service or value was injected via implicit injections which overrode your explicit injection. Implicit injections have been deprecated, and will be removed in the near future. In order to prevent breakage, you should inject the same value explicitly that is currently being injected implicitly.`
+            );
+          } else if (possibleDesc instanceof TrackedDescriptor) {
+            let descValue = possibleDesc.get(obj, keyName);
+
+            if (value !== descValue) {
+              implicitInjectionDeprecation(
+                keyName,
+                `A value was injected implicitly on the '${keyName}' tracked property of an instance of ${inspect(
+                  obj
+                )}, overwriting the original value which was ${inspect(
+                  descValue
+                )}. Implicit injection is now deprecated, please add an explicit injection for this value. If the injected value is a service, consider using the @service decorator.`
+              );
+            }
+          } else if (possibleDesc._setter === undefined) {
+            implicitInjectionDeprecation(
+              keyName,
+              `A value was injected implicitly on the '${keyName}' computed property of an instance of ${inspect(
+                obj
+              )}. Implicit injection is now deprecated, please add an explicit injection for this value. If the injected value is a service, consider using the @service decorator.`
+            );
+          }
+        }
+
         possibleDesc.set(obj, keyName, value);
       } else if (typeof obj.setUnknownProperty === 'function' && !(keyName in obj)) {
         obj.setUnknownProperty(keyName, value);
       } else {
         if (DEBUG) {
-          defineProperty(obj, keyName, null, value, m); // setup mandatory setter
+          // If deprecation, either 1) an accessor descriptor or 2) class field declaration 3) only an implicit injection
+          let desc = lookupDescriptor(obj, keyName);
+
+          if (injectedProperties.indexOf(keyName) === -1) {
+            // Value was not an injected property, define in like normal
+            defineProperty(obj, keyName, null, value, m); // setup mandatory setter
+          } else if (desc) {
+            // If the property is a value prop, and it isn't the expected value,
+            // then we can warn the user when they attempt to use the value
+            if ('value' in desc && desc.value !== value) {
+              // implicit injection does not match value descriptor set on object
+              defineSelfDestructingImplicitInjectionGetter(
+                obj,
+                keyName,
+                value,
+                `A value was injected implicitly on the '${keyName}' property of an instance of ${inspect(
+                  obj
+                )}, overwriting the original value which was ${inspect(
+                  desc.value
+                )}. Implicit injection is now deprecated, please add an explicit injection for this value. If the injected value is a service, consider using the @service decorator.`
+              );
+            } else {
+              // Otherwise, the value is either a getter/setter, or it is the correct value.
+              // If it is a getter/setter, then we don't know what activating it might do - it could
+              // be that the user only defined a getter, and so the value will not be set at all. It
+              // could be that the setter is a no-op that does nothing. Both of these are valid ways
+              // to "override" an implicit injection, so we can't really warn here. So, assign the
+              // value like we would normally.
+              obj[keyName] = value;
+            }
+          } else {
+            defineSelfDestructingImplicitInjectionGetter(
+              obj,
+              keyName,
+              value,
+              `A value was injected implicitly on the '${keyName}' property of an instance of ${inspect(
+                obj
+              )}. Implicit injection is now deprecated, please add an explicit injection for this value. If the injected value is a service, consider using the @service decorator.`
+            );
+          }
         } else {
           obj[keyName] = value;
         }
@@ -135,20 +220,29 @@ function initialize(obj, properties) {
 
   m.unsetInitializing();
 
-  if (EMBER_METAL_TRACKED_PROPERTIES) {
-    let observerEvents = m.observerEvents();
+  let observerEvents = m.observerEvents();
 
-    if (observerEvents !== undefined) {
-      for (let i = 0; i < observerEvents.length; i++) {
-        activateObserver(obj, observerEvents[i].event, observerEvents[i].sync);
-      }
+  if (observerEvents !== undefined) {
+    for (let i = 0; i < observerEvents.length; i++) {
+      activateObserver(obj, observerEvents[i].event, observerEvents[i].sync);
     }
-  } else {
-    // re-enable chains
-    finishChains(m);
   }
 
   sendEvent(obj, 'init', undefined, undefined, undefined, m);
+}
+
+function defineSelfDestructingImplicitInjectionGetter(obj, keyName, value, message) {
+  Object.defineProperty(obj, keyName, {
+    configurable: true,
+    enumerable: true,
+    get() {
+      // only want to deprecate on first access so we make this self destructing
+      Object.defineProperty(obj, keyName, { value });
+
+      implicitInjectionDeprecation(keyName, message);
+      return value;
+    },
+  });
 }
 
 /**
@@ -213,17 +307,11 @@ function initialize(obj, properties) {
   @public
 */
 class CoreObject {
-  static _initFactory(factory) {
-    factoryMap.set(this, factory);
-  }
-
-  constructor(passedFromCreate) {
-    // pluck off factory
-    let initFactory = factoryMap.get(this.constructor);
-    if (initFactory !== undefined) {
-      factoryMap.delete(this.constructor);
-      FACTORY_FOR.set(this, initFactory);
-    }
+  constructor(owner) {
+    // setOwner has to set both OWNER and LEGACY_OWNER for backwards compatibility, and
+    // LEGACY_OWNER is enumerable, so setting it would add an enumerable property to the object,
+    // so we just set `OWNER` directly here.
+    this[OWNER] = owner;
 
     // prepare prototype...
     this.constructor.proto();
@@ -277,39 +365,25 @@ class CoreObject {
           }
         },
       });
-
-      FACTORY_FOR.set(self, initFactory);
     }
+
+    registerDestructor(self, ensureDestroyCalled, true);
+    registerDestructor(self, () => self.willDestroy());
 
     // disable chains
     let m = meta(self);
 
     m.setInitializing();
 
-    assert(
-      `An EmberObject based class, ${this.constructor}, was not instantiated correctly. You may have either used \`new\` instead of \`.create()\`, or not passed arguments to your call to super in the constructor: \`super(...arguments)\`. If you are trying to use \`new\`, consider using native classes without extending from EmberObject.`,
-      (() => {
-        if (passedFromCreate === PASSED_FROM_CREATE) {
-          return true;
-        }
-
-        if (initFactory === undefined) {
-          return false;
-        }
-
-        if (passedFromCreate === initFactory.owner) {
-          return true;
-        }
-
-        return false;
-      })()
-    );
-
     // only return when in debug builds and `self` is the proxy created above
     if (DEBUG && self !== this) {
       return self;
     }
   }
+
+  // Empty setter for absorbing setting the LEGACY_OWNER, which should _not_
+  // become an enumerable property, and should not be used in general.
+  set [LEGACY_OWNER](value) {}
 
   reopen(...args) {
     applyMixin(this, args);
@@ -338,9 +412,10 @@ class CoreObject {
     // alerts 'Name is Steve'.
     ```
 
-    NOTE: If you do override `init` for a framework class like `Ember.View`,
-    be sure to call `this._super(...arguments)` in your
-    `init` declaration! If you don't, Ember may not have an opportunity to
+    NOTE: If you do override `init` for a framework class like `Component`
+    from `@ember/component`, be sure to call `this._super(...arguments)`
+    in your `init` declaration!
+    If you don't, Ember may not have an opportunity to
     do important setup work, and you'll see strange behavior in your
     application.
 
@@ -358,7 +433,7 @@ class CoreObject {
     in the superclass. However, there are some cases where it is preferable
     to build up a property's value by combining the superclass' property
     value with the subclass' value. An example of this in use within Ember
-    is the `classNames` property of `Ember.View`.
+    is the `classNames` property of `Component` from `@ember/component`.
 
     Here is some sample code showing the difference between a concatenated
     property and a normal one:
@@ -509,7 +584,7 @@ class CoreObject {
     @public
   */
   get isDestroyed() {
-    return peekMeta(this).isSourceDestroyed();
+    return isDestroyed(this);
   }
 
   set isDestroyed(value) {
@@ -527,7 +602,7 @@ class CoreObject {
     @public
   */
   get isDestroying() {
-    return peekMeta(this).isSourceDestroying();
+    return isDestroying(this);
   }
 
   set isDestroying(value) {
@@ -549,15 +624,14 @@ class CoreObject {
     @public
   */
   destroy() {
-    let m = peekMeta(this);
-    if (m.isSourceDestroying()) {
-      return;
+    // Used to ensure that manually calling `.destroy()` does not immediately call destroy again
+    destroyCalled.add(this);
+
+    try {
+      destroy(this);
+    } finally {
+      destroyCalled.delete(this);
     }
-
-    m.setSourceDestroying();
-
-    schedule('actions', this, this.willDestroy);
-    schedule('destroy', this, this._scheduledDestroy, m);
 
     return this;
   }
@@ -569,21 +643,6 @@ class CoreObject {
     @public
   */
   willDestroy() {}
-
-  /**
-    Invoked by the run loop to actually destroy the object. This is
-    scheduled for execution by the `destroy` method.
-
-    @private
-    @method _scheduledDestroy
-  */
-  _scheduledDestroy(m) {
-    if (m.isSourceDestroyed()) {
-      return;
-    }
-    deleteMeta(this);
-    m.setSourceDestroyed();
-  }
 
   /**
     Returns a string representation which attempts to provide more information
@@ -628,11 +687,7 @@ class CoreObject {
     let hasToStringExtension = typeof this.toStringExtension === 'function';
     let extension = hasToStringExtension ? `:${this.toStringExtension()}` : '';
 
-    let ret = `<${getName(this) || FACTORY_FOR.get(this) || this.constructor.toString()}:${guidFor(
-      this
-    )}${extension}>`;
-
-    return ret;
+    return `<${getFactoryFor(this) || '(unknown)'}:${guidFor(this)}${extension}>`;
   }
 
   /**
@@ -777,28 +832,13 @@ class CoreObject {
     @public
   */
   static create(props, extra) {
-    let C = this;
     let instance;
 
-    if (this[FRAMEWORK_CLASSES]) {
-      let initFactory = factoryMap.get(this);
-      let owner;
-      if (initFactory !== undefined) {
-        owner = initFactory.owner;
-      } else if (props !== undefined) {
-        owner = getOwner(props);
-      }
-
-      if (owner === undefined) {
-        // fallback to passing the special PASSED_FROM_CREATE symbol
-        // to avoid an error when folks call things like Controller.extend().create()
-        // we should do a subsequent deprecation pass to ensure this isn't allowed
-        owner = PASSED_FROM_CREATE;
-      }
-
-      instance = new C(owner);
+    if (props !== undefined) {
+      instance = new this(getOwner(props));
+      setFactoryFor(instance, getFactoryFor(props));
     } else {
-      instance = DEBUG ? new C(PASSED_FROM_CREATE) : new C();
+      instance = new this();
     }
 
     if (extra === undefined) {
@@ -1044,10 +1084,11 @@ class CoreObject {
     }
     return p;
   }
-}
 
-CoreObject.toString = classToString;
-setName(CoreObject, 'Ember.CoreObject');
+  static toString() {
+    return `<${getFactoryFor(this) || '(unknown)'}:constructor>`;
+  }
+}
 
 CoreObject.isClass = true;
 CoreObject.isMethod = false;
@@ -1088,7 +1129,7 @@ function flattenProps(...props) {
       if (hasMergedProps && mergedProperties.indexOf(keyName) > -1) {
         let baseValue = initProperties[keyName];
 
-        value = assign({}, baseValue, value);
+        value = Object.assign({}, baseValue, value);
       }
 
       initProperties[keyName] = value;
@@ -1128,7 +1169,7 @@ if (DEBUG) {
     @return {Object} Hash of all lazy injected property keys to container names
     @private
   */
-  CoreObject._lazyInjections = function() {
+  CoreObject._lazyInjections = function () {
     let injections = {};
     let proto = this.proto();
     let key;
@@ -1149,6 +1190,56 @@ if (DEBUG) {
 
     return injections;
   };
+}
+
+if (!HAS_NATIVE_SYMBOL) {
+  // Allows OWNER and INIT_FACTORY to be non-enumerable in IE11
+  let instanceOwner = new WeakMap();
+  let instanceFactory = new WeakMap();
+
+  Object.defineProperty(CoreObject.prototype, OWNER, {
+    get() {
+      return instanceOwner.get(this);
+    },
+
+    set(value) {
+      instanceOwner.set(this, value);
+    },
+  });
+
+  Object.defineProperty(CoreObject.prototype, INIT_FACTORY, {
+    get() {
+      return instanceFactory.get(this);
+    },
+
+    set(value) {
+      instanceFactory.set(this, value);
+    },
+  });
+
+  Object.defineProperty(CoreObject, INIT_FACTORY, {
+    get() {
+      return instanceFactory.get(this);
+    },
+
+    set(value) {
+      instanceFactory.set(this, value);
+    },
+
+    enumerable: false,
+  });
+}
+
+function implicitInjectionDeprecation(keyName, msg = null) {
+  deprecate(msg, false, {
+    id: 'implicit-injections',
+    until: '4.0.0',
+    url: 'https://deprecations.emberjs.com/v3.x#toc_implicit-injections',
+    for: 'ember-source',
+    since: {
+      enabled: '3.26.0',
+    },
+  });
 }
 
 export default CoreObject;

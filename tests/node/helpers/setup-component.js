@@ -1,32 +1,15 @@
 'use strict';
 
-const path = require('path');
 const SimpleDOM = require('simple-dom');
 const buildOwner = require('./build-owner');
+const { loadEmber, clearEmber } = require('./load-ember');
 
-const distPath = path.join(__dirname, '../../../dist');
-const emberPath = path.join(distPath, 'tests/ember');
-const templateCompilerPath = path.join(distPath, 'ember-template-compiler');
+module.exports = function (hooks) {
+  hooks.beforeEach(function () {
+    let { Ember, compile } = loadEmber();
 
-function clearEmber() {
-  delete global.Ember;
-
-  // clear the previously cached version of this module
-  delete require.cache[emberPath + '.js'];
-  delete require.cache[templateCompilerPath + '.js'];
-}
-
-module.exports = function(hooks) {
-  hooks.beforeEach(function() {
-    let precompile = require(templateCompilerPath).precompile;
-    this.compile = function compile(templateString, options) {
-      let templateSpec = precompile(templateString, options);
-      let template = new Function('return ' + templateSpec)();
-
-      return this.Ember.HTMLBars.template(template);
-    };
-
-    let Ember = (this.Ember = require(emberPath));
+    this.compile = compile;
+    this.Ember = Ember;
 
     Ember.testing = true;
     this.run = Ember.run;
@@ -34,11 +17,11 @@ module.exports = function(hooks) {
     setupComponentTest.call(this);
   });
 
-  hooks.afterEach(function() {
+  hooks.afterEach(function () {
     let module = this;
 
     if (this.component) {
-      this.run(function() {
+      this.run(function () {
         module.component.destroy();
       });
 
@@ -57,7 +40,7 @@ function setupComponentTest() {
   let module = this;
 
   module.element = new SimpleDOM.Document();
-  module.owner = buildOwner(this.Ember, { resolve: function() {} });
+  module.owner = buildOwner(this.Ember, { resolve: function () {} });
   module.owner.register('service:-document', new SimpleDOM.Document(), {
     instantiate: false,
   });
@@ -80,14 +63,14 @@ function setupComponentTest() {
     outlets: {},
   };
 
-  this.run(function() {
+  this.run(function () {
     module.component.setOutletState(module._outletState);
   });
 
   module.render = render;
   module.serializeElement = serializeElement;
-  module.set = function(property, value) {
-    module.run(function() {
+  module.set = function (property, value) {
+    module.run(function () {
       module.Ember.set(module, property, value);
     });
   };
@@ -110,12 +93,12 @@ function render(_template) {
   stateToRender.name = 'index';
   this._outletState.outlets.main = { render: stateToRender, outlets: {} };
 
-  this.run(function() {
+  this.run(function () {
     module.component.setOutletState(module._outletState);
   });
 
   if (!this._hasRendered) {
-    this.run(function() {
+    this.run(function () {
       module.component.appendTo(module.element);
     });
     this._hasRendered = true;

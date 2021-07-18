@@ -1,8 +1,10 @@
 import { RenderingTestCase, moduleFor, runDestroy, runTask } from 'internal-test-helpers';
-
-import { assign } from '@ember/polyfills';
+import { EMBER_MODERNIZED_BUILT_IN_COMPONENTS } from '@ember/canary-features';
+import { action } from '@ember/object';
+import { Checkbox, TextArea, TextField } from '@ember/-internals/glimmer';
 import { set } from '@ember/-internals/metal';
-import { jQueryDisabled, jQuery } from '@ember/-internals/views';
+import { TargetActionSupport } from '@ember/-internals/runtime';
+import { getElementView, jQueryDisabled, jQuery, TextSupport } from '@ember/-internals/views';
 
 import { Component } from '../../utils/helpers';
 
@@ -56,7 +58,7 @@ class InputRenderingTest extends RenderingTestCase {
   }
 
   assertAllAttrs(names, expected) {
-    names.forEach(name => this.assertAttr(name, expected));
+    names.forEach((name) => this.assertAttr(name, expected));
   }
 
   assertSelectionRange(start, end) {
@@ -68,7 +70,7 @@ class InputRenderingTest extends RenderingTestCase {
   triggerEvent(type, options, selector) {
     let event = document.createEvent('Events');
     event.initEvent(type, true, true);
-    assign(event, options);
+    Object.assign(event, options);
 
     let element = this.$(selector || 'input')[0];
     runTask(() => {
@@ -130,7 +132,7 @@ class InputRenderingTest extends RenderingTestCase {
         args.push(`@type="${type}"`);
       }
 
-      Object.keys(events).forEach(event => {
+      Object.keys(events).forEach((event) => {
         args.push(`@${events[event]}={{action "didTrigger" "${id}" "${event}"}}`);
       });
 
@@ -142,7 +144,13 @@ class InputRenderingTest extends RenderingTestCase {
       <TestComponent ${argsFor('custom')} />
     `;
 
-    this.render(template, { actions });
+    expectDeprecation(
+      () => {
+        this.render(template, { actions });
+      },
+      /Passing the `@(touchStart|touchMove|touchEnd|touchCancel|keyDown|keyUp|keyPress|mouseDown|mouseUp|contextMenu|click|doubleClick|focusIn|focusOut|submit|input|change|dragStart|drag|dragEnter|dragLeave|dragOver|drop|dragEnd|mouseEnter|mouseLeave|mouseMove|focus-in|focus-out|key-press|key-up|key-down)` argument to <Input> is deprecated\./,
+      EMBER_MODERNIZED_BUILT_IN_COMPONENTS
+    );
 
     this.assert.ok(this.$('input').length === 2);
 
@@ -151,10 +159,19 @@ class InputRenderingTest extends RenderingTestCase {
 
     this.assert.equal($standard.type, $custom.type);
 
-    Object.keys(events).forEach(event => {
-      this.triggerEvent(event, null, '#standard');
-      this.triggerEvent(event, null, '#custom');
+    Object.keys(events).forEach((event) => {
+      // triggerEvent does not seem to work with focusin and focusout events
+      if (event !== 'focusin' && event !== 'focusout') {
+        this.triggerEvent(event, null, '#standard');
+        this.triggerEvent(event, null, '#custom');
+      }
     });
+
+    // test focusin and focusout by actually moving focus
+    $standard[0].focus();
+    $standard[0].blur();
+    $custom[0].focus();
+    $custom[0].blur();
 
     this.assert.ok(
       triggered.standard.length > 10,
@@ -174,7 +191,7 @@ moduleFor(
   'Components test: <Input />',
   class extends InputRenderingTest {
     ['@test a single text field is inserted into the DOM']() {
-      this.render(`<Input @type="text" @value={{value}} />`, { value: 'hello' });
+      this.render(`<Input @type="text" @value={{this.value}} />`, { value: 'hello' });
 
       let id = this.inputID();
 
@@ -213,17 +230,19 @@ moduleFor(
     ['@test dynamic attributes (HTML attribute)']() {
       this.render(
         `
-      <Input @type="text" @value={{value}}
-        disabled={{disabled}}
-        placeholder={{placeholder}}
-        name={{name}}
-        maxlength={{maxlength}}
-        minlength={{minlength}}
-        size={{size}}
-        tabindex={{tabindex}}
+      <Input @type="text" @value={{this.value}}
+        role={{this.role}}
+        disabled={{this.disabled}}
+        placeholder={{this.placeholder}}
+        name={{this.name}}
+        maxlength={{this.maxlength}}
+        minlength={{this.minlength}}
+        size={{this.size}}
+        tabindex={{this.tabindex}}
       />`,
         {
           value: 'Original value',
+          role: 'textbox',
           disabled: false,
           placeholder: 'Original placeholder',
           name: 'original-name',
@@ -236,6 +255,7 @@ moduleFor(
 
       this.assertNotDisabled();
       this.assertValue('Original value');
+      this.assertAttr('role', 'textbox');
       this.assertAttr('placeholder', 'Original placeholder');
       this.assertAttr('name', 'original-name');
       this.assertAttr('maxlength', '10');
@@ -247,6 +267,7 @@ moduleFor(
 
       this.assertNotDisabled();
       this.assertValue('Original value');
+      this.assertAttr('role', 'textbox');
       this.assertAttr('placeholder', 'Original placeholder');
       this.assertAttr('name', 'original-name');
       this.assertAttr('maxlength', '10');
@@ -256,6 +277,7 @@ moduleFor(
 
       runTask(() => {
         set(this.context, 'value', 'Updated value');
+        set(this.context, 'role', 'search');
         set(this.context, 'disabled', true);
         set(this.context, 'placeholder', 'Updated placeholder');
         set(this.context, 'name', 'updated-name');
@@ -267,6 +289,7 @@ moduleFor(
 
       this.assertDisabled();
       this.assertValue('Updated value');
+      this.assertAttr('role', 'search');
       this.assertAttr('placeholder', 'Updated placeholder');
       this.assertAttr('name', 'updated-name');
       this.assertAttr('maxlength', '11');
@@ -276,6 +299,7 @@ moduleFor(
 
       runTask(() => {
         set(this.context, 'value', 'Original value');
+        set(this.context, 'role', 'textbox');
         set(this.context, 'disabled', false);
         set(this.context, 'placeholder', 'Original placeholder');
         set(this.context, 'name', 'original-name');
@@ -287,6 +311,7 @@ moduleFor(
 
       this.assertNotDisabled();
       this.assertValue('Original value');
+      this.assertAttr('role', 'textbox');
       this.assertAttr('placeholder', 'Original placeholder');
       this.assertAttr('name', 'original-name');
       this.assertAttr('maxlength', '10');
@@ -295,32 +320,41 @@ moduleFor(
       // this.assertAttr('tabindex', '30'); //NOTE: failing in IE (TEST_SUITE=sauce)
     }
 
-    ['@test dynamic attributes (named argument)']() {
-      this.render(
-        `
-      <Input @type="text" @value={{value}}
-        @disabled={{disabled}}
-        @placeholder={{placeholder}}
-        @name={{name}}
-        @maxlength={{maxlength}}
-        @minlength={{minlength}}
-        @size={{size}}
-        @tabindex={{tabindex}}
-      />`,
-        {
-          value: 'Original value',
-          disabled: false,
-          placeholder: 'Original placeholder',
-          name: 'original-name',
-          maxlength: 10,
-          minlength: 5,
-          size: 20,
-          tabindex: 30,
-        }
+    ['@test [DEPRECATED] dynamic attributes (named argument)']() {
+      expectDeprecation(
+        () => {
+          this.render(
+            `<Input @type="text" @value={{this.value}}
+              @elementId="test-input"
+              @ariaRole={{this.role}}
+              @disabled={{this.disabled}}
+              @placeholder={{this.placeholder}}
+              @name={{this.name}}
+              @maxlength={{this.maxlength}}
+              @minlength={{this.minlength}}
+              @size={{this.size}}
+              @tabindex={{this.tabindex}}/>`,
+            {
+              value: 'Original value',
+              role: 'textbox',
+              disabled: false,
+              placeholder: 'Original placeholder',
+              name: 'original-name',
+              maxlength: 10,
+              minlength: 5,
+              size: 20,
+              tabindex: 30,
+            }
+          );
+        },
+        /Passing the `@(elementId|ariaRole|disabled|placeholder|name|maxlength|minlength|size|tabindex)` argument to <Input> is deprecated\./,
+        EMBER_MODERNIZED_BUILT_IN_COMPONENTS
       );
 
       this.assertNotDisabled();
       this.assertValue('Original value');
+      this.assertAttr('id', 'test-input');
+      this.assertAttr('role', 'textbox');
       this.assertAttr('placeholder', 'Original placeholder');
       this.assertAttr('name', 'original-name');
       this.assertAttr('maxlength', '10');
@@ -332,6 +366,8 @@ moduleFor(
 
       this.assertNotDisabled();
       this.assertValue('Original value');
+      this.assertAttr('id', 'test-input');
+      this.assertAttr('role', 'textbox');
       this.assertAttr('placeholder', 'Original placeholder');
       this.assertAttr('name', 'original-name');
       this.assertAttr('maxlength', '10');
@@ -339,19 +375,28 @@ moduleFor(
       // this.assertAttr('size', '20'); //NOTE: failing in IE (TEST_SUITE=sauce)
       // this.assertAttr('tabindex', '30'); //NOTE: failing in IE (TEST_SUITE=sauce)
 
-      runTask(() => {
-        set(this.context, 'value', 'Updated value');
-        set(this.context, 'disabled', true);
-        set(this.context, 'placeholder', 'Updated placeholder');
-        set(this.context, 'name', 'updated-name');
-        set(this.context, 'maxlength', 11);
-        set(this.context, 'minlength', 6);
-        // set(this.context, 'size', 21); //NOTE: failing in IE (TEST_SUITE=sauce)
-        // set(this.context, 'tabindex', 31); //NOTE: failing in IE (TEST_SUITE=sauce)
-      });
+      expectDeprecation(
+        () => {
+          runTask(() => {
+            set(this.context, 'value', 'Updated value');
+            set(this.context, 'role', 'search');
+            set(this.context, 'disabled', true);
+            set(this.context, 'placeholder', 'Updated placeholder');
+            set(this.context, 'name', 'updated-name');
+            set(this.context, 'maxlength', 11);
+            set(this.context, 'minlength', 6);
+            // set(this.context, 'size', 21); //NOTE: failing in IE (TEST_SUITE=sauce)
+            // set(this.context, 'tabindex', 31); //NOTE: failing in IE (TEST_SUITE=sauce)
+          });
+        },
+        /Passing the `@(elementId|ariaRole|disabled|placeholder|name|maxlength|minlength|size|tabindex)` argument to <Input> is deprecated\./,
+        EMBER_MODERNIZED_BUILT_IN_COMPONENTS
+      );
 
       this.assertDisabled();
       this.assertValue('Updated value');
+      this.assertAttr('id', 'test-input');
+      this.assertAttr('role', 'search');
       this.assertAttr('placeholder', 'Updated placeholder');
       this.assertAttr('name', 'updated-name');
       this.assertAttr('maxlength', '11');
@@ -359,19 +404,28 @@ moduleFor(
       // this.assertAttr('size', '21'); //NOTE: failing in IE (TEST_SUITE=sauce)
       // this.assertAttr('tabindex', '31'); //NOTE: failing in IE (TEST_SUITE=sauce)
 
-      runTask(() => {
-        set(this.context, 'value', 'Original value');
-        set(this.context, 'disabled', false);
-        set(this.context, 'placeholder', 'Original placeholder');
-        set(this.context, 'name', 'original-name');
-        set(this.context, 'maxlength', 10);
-        set(this.context, 'minlength', 5);
-        // set(this.context, 'size', 20); //NOTE: failing in IE (TEST_SUITE=sauce)
-        // set(this.context, 'tabindex', 30); //NOTE: failing in IE (TEST_SUITE=sauce)
-      });
+      expectDeprecation(
+        () => {
+          runTask(() => {
+            set(this.context, 'value', 'Original value');
+            set(this.context, 'role', 'textbox');
+            set(this.context, 'disabled', false);
+            set(this.context, 'placeholder', 'Original placeholder');
+            set(this.context, 'name', 'original-name');
+            set(this.context, 'maxlength', 10);
+            set(this.context, 'minlength', 5);
+            // set(this.context, 'size', 20); //NOTE: failing in IE (TEST_SUITE=sauce)
+            // set(this.context, 'tabindex', 30); //NOTE: failing in IE (TEST_SUITE=sauce)
+          });
+        },
+        /Passing the `@(elementId|ariaRole|disabled|placeholder|name|maxlength|minlength|size|tabindex)` argument to <Input> is deprecated\./,
+        EMBER_MODERNIZED_BUILT_IN_COMPONENTS
+      );
 
       this.assertNotDisabled();
       this.assertValue('Original value');
+      this.assertAttr('id', 'test-input');
+      this.assertAttr('role', 'textbox');
       this.assertAttr('placeholder', 'Original placeholder');
       this.assertAttr('name', 'original-name');
       this.assertAttr('maxlength', '10');
@@ -383,6 +437,8 @@ moduleFor(
     ['@test static attributes (HTML attribute)']() {
       this.render(`
       <Input @type="text" @value="Original value"
+        id="test-input"
+        role="search"
         disabled="disabled"
         placeholder="Original placeholder"
         name="original-name"
@@ -394,6 +450,8 @@ moduleFor(
 
       this.assertDisabled();
       this.assertValue('Original value');
+      this.assertAttr('id', 'test-input');
+      this.assertAttr('role', 'search');
       this.assertAttr('placeholder', 'Original placeholder');
       this.assertAttr('name', 'original-name');
       this.assertAttr('maxlength', '10');
@@ -405,6 +463,8 @@ moduleFor(
 
       this.assertDisabled();
       this.assertValue('Original value');
+      this.assertAttr('id', 'test-input');
+      this.assertAttr('role', 'search');
       this.assertAttr('placeholder', 'Original placeholder');
       this.assertAttr('name', 'original-name');
       this.assertAttr('maxlength', '10');
@@ -413,20 +473,30 @@ moduleFor(
       // this.assertAttr('tabindex', '30');  //NOTE: failing in IE (TEST_SUITE=sauce)
     }
 
-    ['@test static attributes (named argument)']() {
-      this.render(`
-      <Input @type="text" @value="Original value"
-        @disabled={{true}}
-        @placeholder="Original placeholder"
-        @name="original-name"
-        @maxlength={{10}}
-        @minlength={{5}}
-        @size={{20}}
-        @tabindex={{30}}
-      />`);
+    ['@test [DEPRECATED] static attributes (named argument)']() {
+      expectDeprecation(
+        () => {
+          this.render(
+            `<Input @type="text" @value="Original value"
+              @elementId="test-input"
+              @ariaRole="search"
+              @disabled={{true}}
+              @placeholder="Original placeholder"
+              @name="original-name"
+              @maxlength={{10}}
+              @minlength={{5}}
+              @size={{20}}
+              @tabindex={{30}}/>`
+          );
+        },
+        /Passing the `@(elementId|ariaRole|disabled|placeholder|name|maxlength|minlength|size|tabindex)` argument to <Input> is deprecated\./,
+        EMBER_MODERNIZED_BUILT_IN_COMPONENTS
+      );
 
       this.assertDisabled();
       this.assertValue('Original value');
+      this.assertAttr('id', 'test-input');
+      this.assertAttr('role', 'search');
       this.assertAttr('placeholder', 'Original placeholder');
       this.assertAttr('name', 'original-name');
       this.assertAttr('maxlength', '10');
@@ -438,6 +508,8 @@ moduleFor(
 
       this.assertDisabled();
       this.assertValue('Original value');
+      this.assertAttr('id', 'test-input');
+      this.assertAttr('role', 'search');
       this.assertAttr('placeholder', 'Original placeholder');
       this.assertAttr('name', 'original-name');
       this.assertAttr('maxlength', '10');
@@ -451,7 +523,7 @@ moduleFor(
       // causes an event in Safari.
       runDestroy(this.owner.lookup('event_dispatcher:main'));
 
-      this.render(`<Input @type="text" @value={{value}} />`, { value: 'original' });
+      this.render(`<Input @type="text" @value={{this.value}} />`, { value: 'original' });
 
       let input = this.$input()[0];
 
@@ -503,7 +575,7 @@ moduleFor(
       }, 'Passing actions to components as strings (like `<Input @enter="foo" />`) is deprecated. Please use closure actions instead (`<Input @enter={{action "foo"}} />`). (\'-top-level\' @ L1:C0) ');
 
       expectDeprecation(() => {
-        this.triggerEvent('keyup', { keyCode: 13 });
+        this.triggerEvent('keyup', { key: 'Enter' });
       }, 'Passing actions to components as strings (like `<Input @enter="foo" />`) is deprecated. Please use closure actions instead (`<Input @enter={{action "foo"}} />`).');
     }
 
@@ -526,7 +598,7 @@ moduleFor(
       });
 
       this.triggerEvent('keyup', {
-        keyCode: 13,
+        key: 'Enter',
       });
     }
 
@@ -534,7 +606,7 @@ moduleFor(
       assert.expect(4);
 
       expectDeprecation(() => {
-        this.render(`<Input @value={{value}} @key-press='foo' />`, {
+        this.render(`<Input @value={{this.value}} @key-press='foo' />`, {
           value: 'initial',
 
           actions: {
@@ -548,40 +620,49 @@ moduleFor(
             },
           },
         });
-      }, 'Passing actions to components as strings (like `<Input @key-press="foo" />`) is deprecated. Please use closure actions instead (`<Input @key-press={{action "foo"}} />`). (\'-top-level\' @ L1:C0) ');
+      }, /Passing actions to components as strings \(like `({{input key-press="foo"}}|<Input @key-press="foo" \/>)`\) is deprecated\.|Passing the `@key-press` argument to <Input> is deprecated\./);
 
       expectDeprecation(() => {
-        this.triggerEvent('keypress', { keyCode: 65 });
-      }, 'Passing actions to components as strings (like `<Input @key-press="foo" />`) is deprecated. Please use closure actions instead (`<Input @key-press={{action "foo"}} />`).');
+        this.triggerEvent('keypress', { key: 'A' });
+      }, /Passing actions to components as strings \(like `({{input key-press="foo"}}|<Input @key-press="foo" \/>)`\) is deprecated\./);
     }
 
     ['@test sends an action with `<Input @key-press={{action "foo"}} />` is pressed'](assert) {
-      assert.expect(2);
+      let triggered = 0;
 
-      this.render(`<Input @value={{value}} @key-press={{action 'foo'}} />`, {
-        value: 'initial',
+      expectDeprecation(
+        () => {
+          this.render(`<Input @value={{this.value}} @key-press={{action 'foo'}} />`, {
+            value: 'initial',
 
-        actions: {
-          foo(value, event) {
-            assert.ok(true, 'action was triggered');
-            if (jQueryDisabled) {
-              assert.notOk(event.originalEvent, 'event is not a jQuery.Event');
-            } else {
-              assert.ok(event instanceof jQuery.Event, 'jQuery event was passed');
-            }
-          },
+            actions: {
+              foo(value, event) {
+                triggered++;
+                assert.ok(true, 'action was triggered');
+                if (jQueryDisabled) {
+                  assert.notOk(event.originalEvent, 'event is not a jQuery.Event');
+                } else {
+                  assert.ok(event instanceof jQuery.Event, 'jQuery event was passed');
+                }
+              },
+            },
+          });
         },
-      });
+        /Passing the `@key-press` argument to <Input> is deprecated\./,
+        EMBER_MODERNIZED_BUILT_IN_COMPONENTS
+      );
 
-      this.triggerEvent('keypress', { keyCode: 65 });
+      this.triggerEvent('keypress', { key: 'A' });
+
+      assert.equal(triggered, 1, 'The action was triggered exactly once');
     }
 
     ['@test sends an action to the parent level when `bubbles=true` is provided'](assert) {
-      assert.expect(1);
+      let bubbled = 0;
 
       let ParentComponent = Component.extend({
         change() {
-          assert.ok(true, 'bubbled upwards');
+          bubbled++;
         },
       });
 
@@ -589,21 +670,34 @@ moduleFor(
         ComponentClass: ParentComponent,
         template: `<Input @bubbles={{true}} />`,
       });
-      this.render(`<Parent />`);
+
+      expectDeprecation(
+        () => this.render(`<Parent />`),
+        'Passing the `@bubbles` argument to <Input> is deprecated.',
+        EMBER_MODERNIZED_BUILT_IN_COMPONENTS
+      );
 
       this.triggerEvent('change');
+
+      assert.strictEqual(bubbled, 1, 'bubbled upwards');
     }
 
-    ['@test triggers `focus-in` when focused'](assert) {
+    ['@test [DEPRECATED] triggers `focus-in` when focused'](assert) {
       let wasFocused = false;
 
-      this.render(`<Input @focus-in={{action 'foo'}} />`, {
-        actions: {
-          foo() {
-            wasFocused = true;
-          },
+      expectDeprecation(
+        () => {
+          this.render(`<Input @focus-in={{action 'foo'}} />`, {
+            actions: {
+              foo() {
+                wasFocused = true;
+              },
+            },
+          });
         },
-      });
+        /Passing the `@focus-in` argument to <Input> is deprecated\./,
+        EMBER_MODERNIZED_BUILT_IN_COMPONENTS
+      );
 
       runTask(() => {
         this.$input().focus();
@@ -629,7 +723,7 @@ moduleFor(
       });
 
       this.triggerEvent('keyup', {
-        keyCode: 13,
+        key: 'Enter',
       });
     }
 
@@ -654,7 +748,7 @@ moduleFor(
       }, 'Passing actions to components as strings (like `<Input @escape-press="foo" />`) is deprecated. Please use closure actions instead (`<Input @escape-press={{action "foo"}} />`). (\'-top-level\' @ L1:C0) ');
 
       expectDeprecation(() => {
-        this.triggerEvent('keyup', { keyCode: 27 });
+        this.triggerEvent('keyup', { key: 'Escape' });
       }, 'Passing actions to components as strings (like `<Input @escape-press="foo" />`) is deprecated. Please use closure actions instead (`<Input @escape-press={{action "foo"}} />`).');
     }
 
@@ -676,7 +770,7 @@ moduleFor(
         },
       });
 
-      this.triggerEvent('keyup', { keyCode: 27 });
+      this.triggerEvent('keyup', { key: 'Escape' });
     }
 
     ['@test [DEPRECATED] sends an action with `<Input @key-down="foo" />` when a key is pressed'](
@@ -697,32 +791,41 @@ moduleFor(
             },
           },
         });
-      }, 'Passing actions to components as strings (like `<Input @key-down="foo" />`) is deprecated. Please use closure actions instead (`<Input @key-down={{action "foo"}} />`). (\'-top-level\' @ L1:C0) ');
+      }, /Passing actions to components as strings \(like `({{input key-down="foo"}}|<Input @key-down="foo" \/>)`\) is deprecated\.|Passing the `@key-down` argument to <Input> is deprecated\./);
 
       expectDeprecation(() => {
-        this.triggerEvent('keydown', { keyCode: 65 });
+        this.triggerEvent('keydown', { key: 'A' });
       }, 'Passing actions to components as strings (like `<Input @key-down="foo" />`) is deprecated. Please use closure actions instead (`<Input @key-down={{action "foo"}} />`).');
     }
 
-    ['@test sends an action with `<Input @key-down={{action "foo"}} />` when a key is pressed'](
+    ['@test [DEPRECATED] sends an action with `<Input @key-down={{action "foo"}} />` when a key is pressed'](
       assert
     ) {
-      assert.expect(2);
+      let triggered = 0;
 
-      this.render(`<Input @key-down={{action 'foo'}} />`, {
-        actions: {
-          foo(value, event) {
-            assert.ok(true, 'action was triggered');
-            if (jQueryDisabled) {
-              assert.notOk(event.originalEvent, 'event is not a jQuery.Event');
-            } else {
-              assert.ok(event instanceof jQuery.Event, 'jQuery event was passed');
-            }
-          },
+      expectDeprecation(
+        () => {
+          this.render(`<Input @key-down={{action 'foo'}} />`, {
+            actions: {
+              foo(value, event) {
+                triggered++;
+                assert.ok(true, 'action was triggered');
+                if (jQueryDisabled) {
+                  assert.notOk(event.originalEvent, 'event is not a jQuery.Event');
+                } else {
+                  assert.ok(event instanceof jQuery.Event, 'jQuery event was passed');
+                }
+              },
+            },
+          });
         },
-      });
+        /Passing the `@key-down` argument to <Input> is deprecated\./,
+        EMBER_MODERNIZED_BUILT_IN_COMPONENTS
+      );
 
-      this.triggerEvent('keydown', { keyCode: 65 });
+      this.triggerEvent('keydown', { key: 'A' });
+
+      assert.equal(triggered, 1, 'The action was triggered exactly once');
     }
 
     ['@test [DEPRECATED] sends an action with `<Input @key-up="foo" />` when a key is pressed'](
@@ -743,31 +846,41 @@ moduleFor(
             },
           },
         });
-      }, 'Passing actions to components as strings (like `<Input @key-up="foo" />`) is deprecated. Please use closure actions instead (`<Input @key-up={{action "foo"}} />`). (\'-top-level\' @ L1:C0) ');
+      }, /Passing actions to components as strings \(like `({{input key-up="foo"}}|<Input @key-up="foo" \/>)`\) is deprecated\.|Passing the `@key-up` argument to <Input> is deprecated\./);
 
       expectDeprecation(() => {
-        this.triggerEvent('keyup', { keyCode: 65 });
+        this.triggerEvent('keyup', { key: 'A' });
       }, 'Passing actions to components as strings (like `<Input @key-up="foo" />`) is deprecated. Please use closure actions instead (`<Input @key-up={{action "foo"}} />`).');
     }
 
-    ['@test sends an action with `<Input @key-up={{action "foo"}} />` when a key is pressed'](
+    ['@test [DEPRECATED] sends an action with `<Input @key-up={{action "foo"}} />` when a key is pressed'](
       assert
     ) {
-      assert.expect(2);
+      let triggered = 0;
 
-      this.render(`<Input @key-up={{action 'foo'}} />`, {
-        actions: {
-          foo(value, event) {
-            assert.ok(true, 'action was triggered');
-            if (jQueryDisabled) {
-              assert.notOk(event.originalEvent, 'event is not a jQuery.Event');
-            } else {
-              assert.ok(event instanceof jQuery.Event, 'jQuery event was passed');
-            }
-          },
+      expectDeprecation(
+        () => {
+          this.render(`<Input @key-up={{action 'foo'}} />`, {
+            actions: {
+              foo(value, event) {
+                triggered++;
+                assert.ok(true, 'action was triggered');
+                if (jQueryDisabled) {
+                  assert.notOk(event.originalEvent, 'event is not a jQuery.Event');
+                } else {
+                  assert.ok(event instanceof jQuery.Event, 'jQuery event was passed');
+                }
+              },
+            },
+          });
         },
-      });
-      this.triggerEvent('keyup', { keyCode: 65 });
+        /Passing the `@key-up` argument to <Input> is deprecated\./,
+        EMBER_MODERNIZED_BUILT_IN_COMPONENTS
+      );
+
+      this.triggerEvent('keyup', { key: 'A' });
+
+      assert.equal(triggered, 1, 'The action was triggered exactly once');
     }
 
     ['@test GH#14727 can render a file input after having had render an input of other type']() {
@@ -780,6 +893,22 @@ moduleFor(
     ['@test sends an action with `<Input EVENT={{action "foo"}} />` for native DOM events']() {
       this.assertTriggersNativeDOMEvents();
     }
+
+    ['@test [DEPRECATED] triggers a method with `<Input @key-up={{this.didTrigger}} />`'](assert) {
+      expectDeprecation(
+        () => {
+          this.render(`<Input @key-up={{this.didTrigger}} />`, {
+            didTrigger: action(function () {
+              assert.ok(true, 'action was triggered');
+            }),
+          });
+        },
+        /Passing the `@key-up` argument to <Input> is deprecated\./,
+        EMBER_MODERNIZED_BUILT_IN_COMPONENTS
+      );
+
+      this.triggerEvent('keyup', { key: 'A' });
+    }
   }
 );
 
@@ -787,7 +916,7 @@ moduleFor(
   'Components test: <Input /> with dynamic type',
   class extends InputRenderingTest {
     ['@test a bound property can be used to determine type']() {
-      this.render(`<Input @type={{type}} />`, { type: 'password' });
+      this.render(`<Input @type={{this.type}} />`, { type: 'password' });
 
       this.assertAttr('type', 'password');
 
@@ -805,7 +934,7 @@ moduleFor(
     }
 
     ['@test a subexpression can be used to determine type']() {
-      this.render(`<Input @type={{if isTruthy trueType falseType}} />`, {
+      this.render(`<Input @type={{if this.isTruthy this.trueType this.falseType}} />`, {
         isTruthy: true,
         trueType: 'text',
         falseType: 'password',
@@ -828,13 +957,16 @@ moduleFor(
 
     ['@test GH16256 input macro does not modify params in place']() {
       this.registerComponent('my-input', {
-        template: `<Input @type={{inputType}} />`,
+        template: `<Input @type={{this.inputType}} />`,
       });
 
-      this.render(`<MyInput @inputType={{firstType}} /><MyInput @inputType={{secondType}} />`, {
-        firstType: 'password',
-        secondType: 'email',
-      });
+      this.render(
+        `<MyInput @inputType={{this.firstType}} /><MyInput @inputType={{this.secondType}} />`,
+        {
+          firstType: 'password',
+          secondType: 'email',
+        }
+      );
 
       let inputs = this.element.querySelectorAll('input');
       this.assert.equal(inputs.length, 2, 'there are two inputs');
@@ -849,12 +981,14 @@ moduleFor(
   class extends InputRenderingTest {
     ['@test dynamic attributes (HTML attribute)']() {
       this.render(
-        `<Input @type='checkbox' @checked={{checked}}
-          disabled={{disabled}}
-          name={{name}}
-          tabindex={{tabindex}}
+        `<Input @type='checkbox' @checked={{this.checked}}
+          role={{this.role}}
+          disabled={{this.disabled}}
+          name={{this.name}}
+          tabindex={{this.tabindex}}
         />`,
         {
+          role: 'checkbox',
           disabled: false,
           name: 'original-name',
           checked: false,
@@ -864,6 +998,7 @@ moduleFor(
 
       this.assertSingleCheckbox();
       this.assertNotDisabled();
+      this.assertAttr('role', 'checkbox');
       this.assertAttr('name', 'original-name');
       this.assertAttr('tabindex', '10');
 
@@ -871,10 +1006,12 @@ moduleFor(
 
       this.assertSingleCheckbox();
       this.assertNotDisabled();
+      this.assertAttr('role', 'checkbox');
       this.assertAttr('name', 'original-name');
       this.assertAttr('tabindex', '10');
 
       runTask(() => {
+        set(this.context, 'role', 'radio');
         set(this.context, 'disabled', true);
         set(this.context, 'name', 'updated-name');
         set(this.context, 'tabindex', 11);
@@ -882,10 +1019,12 @@ moduleFor(
 
       this.assertSingleCheckbox();
       this.assertDisabled();
+      this.assertAttr('role', 'radio');
       this.assertAttr('name', 'updated-name');
       this.assertAttr('tabindex', '11');
 
       runTask(() => {
+        set(this.context, 'role', 'checkbox');
         set(this.context, 'disabled', false);
         set(this.context, 'name', 'original-name');
         set(this.context, 'tabindex', 10);
@@ -893,27 +1032,37 @@ moduleFor(
 
       this.assertSingleCheckbox();
       this.assertNotDisabled();
+      this.assertAttr('role', 'checkbox');
       this.assertAttr('name', 'original-name');
       this.assertAttr('tabindex', '10');
     }
 
-    ['@test dynamic attributes (named argument)']() {
-      this.render(
-        `<Input @type='checkbox' @checked={{checked}}
-          @disabled={{disabled}}
-          @name={{name}}
-          @tabindex={{tabindex}}
-        />`,
-        {
-          disabled: false,
-          name: 'original-name',
-          checked: false,
-          tabindex: 10,
-        }
+    ['@test [DEPRECATED] dynamic attributes (named argument)']() {
+      expectDeprecation(
+        () => {
+          this.render(
+            `<Input @type='checkbox' @checked={{this.checked}}
+              @ariaRole={{this.role}}
+              @disabled={{this.disabled}}
+              @name={{this.name}}
+              @tabindex={{this.tabindex}}
+            />`,
+            {
+              role: 'checkbox',
+              disabled: false,
+              name: 'original-name',
+              checked: false,
+              tabindex: 10,
+            }
+          );
+        },
+        /Passing the `@(elementId|ariaRole|disabled|name|tabindex)` argument to <Input> is deprecated\./,
+        EMBER_MODERNIZED_BUILT_IN_COMPONENTS
       );
 
       this.assertSingleCheckbox();
       this.assertNotDisabled();
+      this.assertAttr('role', 'checkbox');
       this.assertAttr('name', 'original-name');
       this.assertAttr('tabindex', '10');
 
@@ -921,42 +1070,80 @@ moduleFor(
 
       this.assertSingleCheckbox();
       this.assertNotDisabled();
+      this.assertAttr('role', 'checkbox');
       this.assertAttr('name', 'original-name');
       this.assertAttr('tabindex', '10');
 
-      runTask(() => {
-        set(this.context, 'disabled', true);
-        set(this.context, 'name', 'updated-name');
-        set(this.context, 'tabindex', 11);
-      });
+      expectDeprecation(
+        () => {
+          runTask(() => {
+            set(this.context, 'role', 'radio');
+            set(this.context, 'disabled', true);
+            set(this.context, 'name', 'updated-name');
+            set(this.context, 'tabindex', 11);
+          });
+        },
+        /Passing the `@(elementId|ariaRole|disabled|name|tabindex)` argument to <Input> is deprecated\./,
+        EMBER_MODERNIZED_BUILT_IN_COMPONENTS
+      );
 
       this.assertSingleCheckbox();
       this.assertDisabled();
+      this.assertAttr('role', 'radio');
       this.assertAttr('name', 'updated-name');
       this.assertAttr('tabindex', '11');
 
-      runTask(() => {
-        set(this.context, 'disabled', false);
-        set(this.context, 'name', 'original-name');
-        set(this.context, 'tabindex', 10);
-      });
+      expectDeprecation(
+        () => {
+          runTask(() => {
+            set(this.context, 'role', 'checkbox');
+            set(this.context, 'disabled', false);
+            set(this.context, 'name', 'original-name');
+            set(this.context, 'tabindex', 10);
+          });
+        },
+        /Passing the `@(elementId|ariaRole|disabled|name|tabindex)` argument to <Input> is deprecated\./,
+        EMBER_MODERNIZED_BUILT_IN_COMPONENTS
+      );
 
       this.assertSingleCheckbox();
       this.assertNotDisabled();
+      this.assertAttr('role', 'checkbox');
       this.assertAttr('name', 'original-name');
       this.assertAttr('tabindex', '10');
     }
 
-    ['@test `value` property assertion']() {
+    ['@feature(!EMBER_MODERNIZED_BUILT_IN_COMPONENTS) `value` property assertion']() {
       expectAssertion(() => {
-        this.render(`<Input @type="checkbox" @value={{value}} />`, {
+        this.render(`<Input @type="checkbox" @value={{this.value}} />`, {
           value: 'value',
         });
       }, /checkbox.+@value.+not supported.+use.+@checked.+instead/);
     }
 
+    ['@feature(EMBER_MODERNIZED_BUILT_IN_COMPONENTS) `value` property warning']() {
+      let message =
+        '`<Input @type="checkbox" />` reflects its checked state via the `@checked` argument. ' +
+        'You wrote `<Input @type="checkbox" @value={{...}} />` which is likely not what you intended. ' +
+        'Did you mean `<Input @type="checkbox" @checked={{...}} />`?';
+
+      expectWarning(() => {
+        this.render(`<Input @type="checkbox" @value={{this.value}} />`, {
+          value: true,
+        });
+      }, message);
+
+      this.assert.strictEqual(this.context.value, true);
+      this.assertCheckboxIsNotChecked();
+
+      expectWarning(() => this.$input()[0].click(), message);
+
+      this.assert.strictEqual(this.context.value, true);
+      this.assertCheckboxIsChecked();
+    }
+
     ['@test with a bound type']() {
-      this.render(`<Input @type={{inputType}} @checked={{isChecked}} />`, {
+      this.render(`<Input @type={{this.inputType}} @checked={{this.isChecked}} />`, {
         inputType: 'checkbox',
         isChecked: true,
       });
@@ -990,12 +1177,13 @@ moduleFor(
 
     ['@test with static values (HTML attribute)']() {
       this.render(
-        `<Input @type="checkbox" @checked={{false}} disabled={{false}} tabindex="10" name="original-name" />`
+        `<Input @type="checkbox" @checked={{false}} role="radio" disabled={{false}} tabindex="10" name="original-name" />`
       );
 
       this.assertSingleCheckbox();
       this.assertCheckboxIsNotChecked();
       this.assertNotDisabled();
+      this.assertAttr('role', 'radio');
       this.assertAttr('tabindex', '10');
       this.assertAttr('name', 'original-name');
 
@@ -1008,14 +1196,21 @@ moduleFor(
       this.assertAttr('name', 'original-name');
     }
 
-    ['@test with static values (named argument)']() {
-      this.render(
-        `<Input @type="checkbox" @checked={{false}} @disabled={{false}} @tabindex={{10}} @name="original-name" />`
+    ['@test [DEPRECATED] with static values (named argument)']() {
+      expectDeprecation(
+        () => {
+          this.render(
+            `<Input @type="checkbox" @checked={{false}} @ariaRole="radio" @disabled={{false}} @tabindex={{10}} @name="original-name" />`
+          );
+        },
+        /Passing the `@(elementId|ariaRole|disabled|tabindex|name)` argument to <Input> is deprecated\./,
+        EMBER_MODERNIZED_BUILT_IN_COMPONENTS
       );
 
       this.assertSingleCheckbox();
       this.assertCheckboxIsNotChecked();
       this.assertNotDisabled();
+      this.assertAttr('role', 'radio');
       this.assertAttr('tabindex', '10');
       this.assertAttr('name', 'original-name');
 
@@ -1024,6 +1219,7 @@ moduleFor(
       this.assertSingleCheckbox();
       this.assertCheckboxIsNotChecked();
       this.assertNotDisabled();
+      this.assertAttr('role', 'radio');
       this.assertAttr('tabindex', '10');
       this.assertAttr('name', 'original-name');
     }
@@ -1038,20 +1234,22 @@ moduleFor(
   `Components test: <Input @type='text' />`,
   class extends InputRenderingTest {
     ['@test null values (HTML attribute)']() {
-      let attributes = ['disabled', 'placeholder', 'name', 'maxlength', 'size', 'tabindex'];
+      let attributes = ['role', 'disabled', 'placeholder', 'name', 'maxlength', 'size', 'tabindex'];
 
       this.render(
         `
-      <Input @type="text" @value={{value}}
-        disabled={{disabled}}
-        placeholder={{placeholder}}
-        name={{name}}
-        maxlength={{maxlength}}
-        size={{size}}
-        tabindex={{tabindex}}
+      <Input @type="text" @value={{this.value}}
+        role={{this.role}}
+        disabled={{this.disabled}}
+        placeholder={{this.placeholder}}
+        name={{this.name}}
+        maxlength={{this.maxlength}}
+        size={{this.size}}
+        tabindex={{this.tabindex}}
       />`,
         {
           value: null,
+          role: null,
           disabled: null,
           placeholder: null,
           name: null,
@@ -1070,6 +1268,7 @@ moduleFor(
       this.assertAllAttrs(attributes, undefined);
 
       runTask(() => {
+        set(this.context, 'role', 'search');
         set(this.context, 'disabled', true);
         set(this.context, 'value', 'Updated value');
         set(this.context, 'placeholder', 'Updated placeholder');
@@ -1081,6 +1280,7 @@ moduleFor(
 
       this.assertDisabled();
       this.assertValue('Updated value');
+      this.assertAttr('role', 'search');
       this.assertAttr('placeholder', 'Updated placeholder');
       this.assertAttr('name', 'updated-name');
       this.assertAttr('maxlength', '11');
@@ -1088,6 +1288,7 @@ moduleFor(
       this.assertAttr('tabindex', '31');
 
       runTask(() => {
+        set(this.context, 'role', null);
         set(this.context, 'disabled', null);
         set(this.context, 'value', null);
         set(this.context, 'placeholder', null);
@@ -1099,6 +1300,7 @@ moduleFor(
 
       this.assertAttr('disabled', undefined);
       this.assertValue('');
+      this.assertAttr('role', undefined);
       // this.assertAttr('placeholder', undefined); //NOTE: this fails with a value of "null" (TEST_SUITE=sauce)
       // this.assertAttr('name', undefined); //NOTE: this fails with a value of "null" (TEST_SUITE=sauce)
       this.assertAttr('maxlength', undefined);
@@ -1106,28 +1308,34 @@ moduleFor(
       this.assertAttr('tabindex', undefined);
     }
 
-    ['@test null values (named argument)']() {
-      let attributes = ['disabled', 'placeholder', 'name', 'maxlength', 'size', 'tabindex'];
+    ['@test [DEPRECATED] null values (named argument)']() {
+      let attributes = ['role', 'disabled', 'placeholder', 'name', 'maxlength', 'size', 'tabindex'];
 
-      this.render(
-        `
-      <Input @type="text" @value={{value}}
-        @disabled={{disabled}}
-        @placeholder={{placeholder}}
-        @name={{name}}
-        @maxlength={{maxlength}}
-        @size={{size}}
-        @tabindex={{tabindex}}
-      />`,
-        {
-          value: null,
-          disabled: null,
-          placeholder: null,
-          name: null,
-          maxlength: null,
-          size: null,
-          tabindex: null,
-        }
+      expectDeprecation(
+        () => {
+          this.render(
+            `<Input @type="text" @value={{this.value}}
+              @ariaRole={{this.role}}
+              @disabled={{this.disabled}}
+              @placeholder={{this.placeholder}}
+              @name={{this.name}}
+              @maxlength={{this.maxlength}}
+              @size={{this.size}}
+              @tabindex={{this.tabindex}}/>`,
+            {
+              value: null,
+              role: null,
+              disabled: null,
+              placeholder: null,
+              name: null,
+              maxlength: null,
+              size: null,
+              tabindex: null,
+            }
+          );
+        },
+        /Passing the `@(elementId|ariaRole|disabled|placeholder|name|maxlength|size|tabindex)` argument to <Input> is deprecated\./,
+        EMBER_MODERNIZED_BUILT_IN_COMPONENTS
       );
 
       this.assertValue('');
@@ -1138,36 +1346,52 @@ moduleFor(
       this.assertValue('');
       this.assertAllAttrs(attributes, undefined);
 
-      runTask(() => {
-        set(this.context, 'disabled', true);
-        set(this.context, 'value', 'Updated value');
-        set(this.context, 'placeholder', 'Updated placeholder');
-        set(this.context, 'name', 'updated-name');
-        set(this.context, 'maxlength', 11);
-        set(this.context, 'size', 21);
-        set(this.context, 'tabindex', 31);
-      });
+      expectDeprecation(
+        () => {
+          runTask(() => {
+            set(this.context, 'role', 'search');
+            set(this.context, 'disabled', true);
+            set(this.context, 'value', 'Updated value');
+            set(this.context, 'placeholder', 'Updated placeholder');
+            set(this.context, 'name', 'updated-name');
+            set(this.context, 'maxlength', 11);
+            set(this.context, 'size', 21);
+            set(this.context, 'tabindex', 31);
+          });
+        },
+        /Passing the `@(elementId|ariaRole|disabled|placeholder|name|maxlength|size|tabindex)` argument to <Input> is deprecated\./,
+        EMBER_MODERNIZED_BUILT_IN_COMPONENTS
+      );
 
       this.assertDisabled();
       this.assertValue('Updated value');
+      this.assertAttr('role', 'search');
       this.assertAttr('placeholder', 'Updated placeholder');
       this.assertAttr('name', 'updated-name');
       this.assertAttr('maxlength', '11');
       this.assertAttr('size', '21');
       this.assertAttr('tabindex', '31');
 
-      runTask(() => {
-        set(this.context, 'disabled', null);
-        set(this.context, 'value', null);
-        set(this.context, 'placeholder', null);
-        set(this.context, 'name', null);
-        set(this.context, 'maxlength', null);
-        // set(this.context, 'size', null); //NOTE: this fails with `Error: Failed to set the 'size' property on 'HTMLInputElement': The value provided is 0, which is an invalid size.` (TEST_SUITE=sauce)
-        set(this.context, 'tabindex', null);
-      });
+      expectDeprecation(
+        () => {
+          runTask(() => {
+            set(this.context, 'role', null);
+            set(this.context, 'disabled', null);
+            set(this.context, 'value', null);
+            set(this.context, 'placeholder', null);
+            set(this.context, 'name', null);
+            set(this.context, 'maxlength', null);
+            // set(this.context, 'size', null); //NOTE: this fails with `Error: Failed to set the 'size' property on 'HTMLInputElement': The value provided is 0, which is an invalid size.` (TEST_SUITE=sauce)
+            set(this.context, 'tabindex', null);
+          });
+        },
+        /Passing the `@(elementId|ariaRole|disabled|placeholder|name|maxlength|size|tabindex)` argument to <Input> is deprecated\./,
+        EMBER_MODERNIZED_BUILT_IN_COMPONENTS
+      );
 
       this.assertAttr('disabled', undefined);
       this.assertValue('');
+      this.assertAttr('role', undefined);
       // this.assertAttr('placeholder', undefined); //NOTE: this fails with a value of "null" (TEST_SUITE=sauce)
       // this.assertAttr('name', undefined); //NOTE: this fails with a value of "null" (TEST_SUITE=sauce)
       this.assertAttr('maxlength', undefined);
@@ -1176,6 +1400,39 @@ moduleFor(
     }
   }
 );
+
+function InputAttributesTest(attrs) {
+  return class extends InputRenderingTest {
+    renderInput(value = 25) {
+      this.render(`<Input ${attrs.replace('%x', value)} />`);
+    }
+
+    ['@test value over default max but below set max is kept']() {
+      this.renderInput('25');
+      this.assertValue('25');
+    }
+
+    ['@test value below default min but above set min is kept']() {
+      this.renderInput('-2');
+      this.assertValue('-2');
+    }
+
+    ['@test in the valid default range is kept']() {
+      this.renderInput('5');
+      this.assertValue('5');
+    }
+
+    ['@test value above max is reset to max']() {
+      this.renderInput('55');
+      this.assertValue('50');
+    }
+
+    ['@test value below min is reset to min']() {
+      this.renderInput('-10');
+      this.assertValue('-5');
+    }
+  };
+}
 
 // These are the permutations of the set:
 // ['type="range"', 'min="-5" max="50"', value="%x"']
@@ -1187,7 +1444,11 @@ moduleFor(
   'min="-5" max="50" @value="%x" @type="range"',
   '@value="%x" min="-5" max="50" @type="range"',
   '@value="%x" @type="range" min="-5" max="50"',
+].forEach((attrs) => {
+  moduleFor(`[GH#15675] Components test: <Input ${attrs} />`, InputAttributesTest(attrs));
+});
 
+[
   // Named argument
   '@type="range" @min="-5" @max="50" @value="%x"',
   '@type="range" @value="%x" @min="-5" @max="50"',
@@ -1195,38 +1456,151 @@ moduleFor(
   '@min="-5" @max="50" @value="%x" @type="range"',
   '@value="%x" @min="-5" @max="50" @type="range"',
   '@value="%x" @type="range" @min="-5" @max="50"',
-].forEach(attrs => {
+].forEach((attrs) => {
   moduleFor(
     `[GH#15675] Components test: <Input ${attrs} />`,
-    class extends InputRenderingTest {
+    class extends InputAttributesTest(attrs) {
       renderInput(value = 25) {
-        this.render(`<Input ${attrs.replace('%x', value)} />`);
-      }
-
-      ['@test value over default max but below set max is kept']() {
-        this.renderInput('25');
-        this.assertValue('25');
-      }
-
-      ['@test value below default min but above set min is kept']() {
-        this.renderInput('-2');
-        this.assertValue('-2');
-      }
-
-      ['@test in the valid default range is kept']() {
-        this.renderInput('5');
-        this.assertValue('5');
-      }
-
-      ['@test value above max is reset to max']() {
-        this.renderInput('55');
-        this.assertValue('50');
-      }
-
-      ['@test value below min is reset to min']() {
-        this.renderInput('-10');
-        this.assertValue('-5');
+        expectDeprecation(
+          () => super.renderInput(value),
+          /Passing the `@(min|max)` argument to <Input> is deprecated\./,
+          EMBER_MODERNIZED_BUILT_IN_COMPONENTS
+        );
       }
     }
   );
 });
+
+if (EMBER_MODERNIZED_BUILT_IN_COMPONENTS) {
+  [
+    ['Ember.Component', Component, true, true],
+    ['Ember.Checkbox', Checkbox, true, false],
+    ['Ember.TextArea', TextArea, false, true],
+    ['Ember.TextField', TextField, true, false],
+    ['Ember.TextSupport', TextSupport, true, true],
+    ['Ember.TargetActionSupport', TargetActionSupport, true, true],
+  ].forEach(([label, ClassOrMixin, shouldDeoptInput, shouldDeoptTextArea]) => {
+    let message =
+      ClassOrMixin === Component
+        ? /Reopening the Ember\.Component super class itself is deprecated\./
+        : new RegExp(`Reopening ${label.replace(/\./g, '\\.')} is deprecated\\.`);
+
+    class DeoptTest extends RenderingTestCase {
+      constructor() {
+        super(...arguments);
+        this.assertDidNotReopen();
+      }
+
+      teardown() {
+        super.teardown();
+        ClassOrMixin._wasReopened = false;
+      }
+
+      assertDidReopen() {
+        this.assert.strictEqual(ClassOrMixin._wasReopened, true, `${label} was marked as reopened`);
+      }
+
+      assertDidNotReopen() {
+        this.assert.strictEqual(
+          ClassOrMixin._wasReopened,
+          false,
+          `${label} was not marked as reopened`
+        );
+      }
+
+      assertDeopt(
+        _shouldDeoptInput = shouldDeoptInput,
+        _shouldDeoptTextArea = shouldDeoptTextArea
+      ) {
+        this.render(`
+          <Input id="test-textbox" @value="hello" />
+          <Input id="test-checkbox" @type="checkbox" @checked={{true}} />
+          <Textarea id="test-textarea" @value="hello world" />
+        `);
+
+        let textbox = this.$('#test-textbox')[0];
+        let checkbox = this.$('#test-checkbox')[0];
+        let textarea = this.$('#test-textarea')[0];
+
+        this.assert.ok(textbox, 'a textbox was rendered');
+        this.assert.ok(checkbox, 'a checkbox was rendered');
+        this.assert.ok(textarea, 'a textarea was rendered');
+
+        this.assert.strictEqual(
+          this.isDeopted(textbox),
+          _shouldDeoptInput,
+          `<Input @type="text" /> ${_shouldDeoptInput ? 'was' : 'was not'} deopted`
+        );
+
+        this.assert.strictEqual(
+          this.isDeopted(checkbox),
+          _shouldDeoptInput,
+          `<Input @type="checkbox" /> ${_shouldDeoptInput ? 'was' : 'was not'} deopted`
+        );
+
+        this.assert.strictEqual(
+          this.isDeopted(textarea),
+          _shouldDeoptTextArea,
+          `<Textarea /> ${_shouldDeoptTextArea ? 'was' : 'was not'} deopted`
+        );
+      }
+
+      isDeopted(element) {
+        return getElementView(element) !== null;
+      }
+
+      [`@test ${label}.reopen()`]() {
+        expectDeprecation(
+          () =>
+            ClassOrMixin.reopen({
+              /* noop */
+            }),
+          message
+        );
+
+        this.assertDidReopen();
+        this.assertDeopt();
+      }
+    }
+
+    if (typeof ClassOrMixin.extend === 'function') {
+      DeoptTest.prototype[`@test ${label}.extend().reopen()`] = function () {
+        ClassOrMixin.extend().reopen({
+          /* noop */
+        });
+
+        this.assertDidNotReopen();
+        this.assertDeopt(false, false);
+      };
+    }
+
+    if (typeof ClassOrMixin.reopenClass === 'function') {
+      DeoptTest.prototype[`@test ${label}.reopenClass()`] = function () {
+        expectDeprecation(
+          () =>
+            ClassOrMixin.reopenClass({
+              /* noop */
+            }),
+          message
+        );
+
+        this.assertDidReopen();
+        this.assertDeopt();
+      };
+
+      DeoptTest.prototype[`@test ${label}.extend().reopenClass()`] = function () {
+        ClassOrMixin.extend().reopenClass({
+          /* noop */
+        });
+
+        this.assertDidNotReopen();
+        this.assertDeopt(false, false);
+      };
+    }
+
+    moduleFor(
+      `Components test: [DEPRECATED] <Input /> and <Textarea /> deopt (${label})`,
+      DeoptTest
+    );
+  });
+}

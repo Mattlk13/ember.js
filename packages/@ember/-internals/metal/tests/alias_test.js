@@ -4,16 +4,14 @@ import {
   defineProperty,
   get,
   set,
-  isWatching,
   addObserver,
   removeObserver,
-  tagFor,
   tagForProperty,
 } from '..';
-import { Object as EmberObject } from '@ember/-internals/runtime';
-import { EMBER_METAL_TRACKED_PROPERTIES } from '@ember/canary-features';
+import { Object as EmberObject, A } from '@ember/-internals/runtime';
 import { moduleFor, AbstractTestCase, runLoopSettled } from 'internal-test-helpers';
-import { value, validate } from '@glimmer/reference';
+import { destroy } from '@glimmer/destroyable';
+import { valueForTag, validateTag } from '@glimmer/validator';
 
 let obj, count;
 
@@ -30,7 +28,11 @@ moduleFor(
     }
 
     afterEach() {
-      obj = null;
+      if (obj !== undefined) {
+        destroy(obj);
+        obj = undefined;
+        return runLoopSettled();
+      }
     }
 
     ['@test should proxy get to alt key'](assert) {
@@ -64,6 +66,27 @@ moduleFor(
       await runLoopSettled();
 
       assert.equal(count, 1);
+    }
+
+    ['@test nested aliases should trigger computed property invalidation [GH#19279]'](assert) {
+      let AttributeModel = EmberObject.extend({
+        countAdditives: alias('additives.length'),
+        additives: A(),
+      });
+
+      let RootModel = EmberObject.extend({
+        allAdditives: computed('metaAttributes.@each.countAdditives', function () {
+          return this.metaAttributes.reduce((acc, el) => {
+            return acc.concat(el.additives);
+          }, []);
+        }),
+        metaAttributes: A([AttributeModel.create()]),
+      });
+
+      let model = RootModel.create();
+      assert.equal(model.allAdditives.length, 0);
+      model.metaAttributes[0].additives.pushObject('foo');
+      assert.equal(model.allAdditives.length, 1);
     }
 
     async [`@test inheriting an observer of the alias from the prototype then
@@ -119,11 +142,11 @@ moduleFor(
       defineProperty(obj, 'bar', alias('foo.faz'));
       get(obj, 'bar');
 
-      let tag = EMBER_METAL_TRACKED_PROPERTIES ? tagForProperty(obj, 'bar') : tagFor(obj);
-      let tagValue = value(tag);
+      let tag = tagForProperty(obj, 'bar');
+      let tagValue = valueForTag(tag);
       set(obj, 'foo.faz', 'BAR');
 
-      assert.ok(!validate(tag, tagValue), 'setting the aliased key should dirty the object');
+      assert.ok(!validateTag(tag, tagValue), 'setting the aliased key should dirty the object');
     }
 
     ['@test setting alias on self should fail assertion']() {
@@ -133,82 +156,23 @@ moduleFor(
       );
     }
 
-    ['@test destroyed alias does not disturb watch count'](assert) {
-      if (!EMBER_METAL_TRACKED_PROPERTIES) {
-        defineProperty(obj, 'bar', alias('foo.faz'));
-
-        assert.equal(get(obj, 'bar'), 'FOO');
-        assert.ok(isWatching(obj, 'foo.faz'));
-
-        defineProperty(obj, 'bar', null);
-
-        assert.notOk(isWatching(obj, 'foo.faz'));
-      } else {
-        assert.expect(0);
-      }
-    }
-
-    ['@test setting on oneWay alias does not disturb watch count'](assert) {
-      if (!EMBER_METAL_TRACKED_PROPERTIES) {
-        defineProperty(obj, 'bar', alias('foo.faz').oneWay());
-
-        assert.equal(get(obj, 'bar'), 'FOO');
-        assert.ok(isWatching(obj, 'foo.faz'));
-
-        set(obj, 'bar', null);
-
-        assert.notOk(isWatching(obj, 'foo.faz'));
-      } else {
-        assert.expect(0);
-      }
-    }
-
-    ['@test redefined alias with observer does not disturb watch count'](assert) {
-      if (!EMBER_METAL_TRACKED_PROPERTIES) {
-        defineProperty(obj, 'bar', alias('foo.faz').oneWay());
-
-        assert.equal(get(obj, 'bar'), 'FOO');
-        assert.ok(isWatching(obj, 'foo.faz'));
-
-        addObserver(obj, 'bar', incrementCount);
-
-        assert.equal(count, 0);
-
-        set(obj, 'bar', null);
-
-        assert.equal(count, 1);
-        assert.notOk(isWatching(obj, 'foo.faz'));
-
-        defineProperty(obj, 'bar', alias('foo.faz'));
-
-        assert.equal(count, 1);
-        assert.ok(isWatching(obj, 'foo.faz'));
-
-        set(obj, 'foo.faz', 'great');
-
-        assert.equal(count, 2);
-      } else {
-        assert.expect(0);
-      }
-    }
-
     ['@test property tags are bumped when the source changes [GH#17243]'](assert) {
       function assertPropertyTagChanged(obj, keyName, callback) {
         let tag = tagForProperty(obj, keyName);
-        let before = value(tag);
+        let before = valueForTag(tag);
 
         callback();
 
-        assert.notOk(validate(tag, before), `tagForProperty ${keyName} should change`);
+        assert.notOk(validateTag(tag, before), `tagForProperty ${keyName} should change`);
       }
 
       function assertPropertyTagUnchanged(obj, keyName, callback) {
         let tag = tagForProperty(obj, keyName);
-        let before = value(tag);
+        let before = valueForTag(tag);
 
         callback();
 
-        assert.ok(validate(tag, before), `tagForProperty ${keyName} should not change`);
+        assert.ok(validateTag(tag, before), `tagForProperty ${keyName} should not change`);
       }
 
       defineProperty(obj, 'bar', alias('foo.faz'));
@@ -226,7 +190,6 @@ moduleFor(
       });
 
       assertPropertyTagUnchanged(obj, 'bar', () => {
-        // trigger willWatch, then didUnwatch
         addObserver(obj, 'bar', incrementCount);
         removeObserver(obj, 'bar', incrementCount);
       });

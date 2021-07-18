@@ -1,34 +1,81 @@
 import { Owner } from '@ember/-internals/owner';
-import { Option } from '@glimmer/interfaces';
+import { deprecate } from '@ember/debug';
+import { COMPONENT_MANAGER_STRING_LOOKUP } from '@ember/deprecated-features';
+import { DEBUG } from '@glimmer/env';
+import { ComponentManager } from '@glimmer/interfaces';
+import {
+  componentCapabilities as glimmerComponentCapabilities,
+  modifierCapabilities as glimmerModifierCapabilities,
+  setComponentManager as glimmerSetComponentManager,
+} from '@glimmer/manager';
 
-const MANAGERS: WeakMap<object, ManagerWrapper<unknown>> = new WeakMap();
+export function setComponentManager(
+  stringOrFunction: string | ((owner: Owner) => ComponentManager<unknown>),
+  obj: object
+): object {
+  let factory: (owner: Owner) => ComponentManager<unknown>;
 
-const getPrototypeOf = Object.getPrototypeOf;
-
-export type ManagerFactory<ManagerDelegate> = (owner: Owner) => ManagerDelegate;
-
-export interface ManagerWrapper<ManagerDelegate> {
-  factory: ManagerFactory<ManagerDelegate>;
-  internal: boolean;
-  type: 'component' | 'modifier';
-}
-
-export function setManager<ManagerDelegate>(wrapper: ManagerWrapper<ManagerDelegate>, obj: object) {
-  MANAGERS.set(obj, wrapper);
-  return obj;
-}
-
-export function getManager<ManagerDelegate>(obj: object): Option<ManagerWrapper<ManagerDelegate>> {
-  let pointer = obj;
-  while (pointer !== undefined && pointer !== null) {
-    let manager = MANAGERS.get(pointer);
-
-    if (manager !== undefined) {
-      return manager as ManagerWrapper<ManagerDelegate>;
-    }
-
-    pointer = getPrototypeOf(pointer);
+  if (COMPONENT_MANAGER_STRING_LOOKUP && typeof stringOrFunction === 'string') {
+    deprecate(
+      'Passing the name of the component manager to "setupComponentManager" is deprecated. Please pass a function that produces an instance of the manager.',
+      false,
+      {
+        id: 'deprecate-string-based-component-manager',
+        until: '4.0.0',
+        url: 'https://deprecations.emberjs.com/v3.x/#toc_component-manager-string-lookup',
+        for: 'ember-source',
+        since: {
+          enabled: '3.8.0',
+        },
+      }
+    );
+    factory = function (owner: Owner) {
+      return owner.lookup<ComponentManager<unknown>>(`component-manager:${stringOrFunction}`)!;
+    };
+  } else {
+    factory = stringOrFunction as (owner: Owner) => ComponentManager<unknown>;
   }
 
-  return null;
+  return glimmerSetComponentManager(factory, obj);
+}
+
+export let componentCapabilities = glimmerComponentCapabilities;
+export let modifierCapabilities = glimmerModifierCapabilities;
+
+if (DEBUG) {
+  componentCapabilities = (version, options) => {
+    deprecate(
+      'Versions of component manager capabilities prior to 3.13 have been deprecated. You must update to the 3.13 capabilities.',
+      version === '3.13',
+      {
+        id: 'manager-capabilities.components-3-4',
+        url: 'https://deprecations.emberjs.com/v3.x#toc_manager-capabilities-components-3-4',
+        until: '4.0.0',
+        for: 'ember-source',
+        since: {
+          enabled: '3.26.0',
+        },
+      }
+    );
+
+    return glimmerComponentCapabilities(version, options);
+  };
+
+  modifierCapabilities = (version, options) => {
+    deprecate(
+      'Versions of modifier manager capabilities prior to 3.22 have been deprecated. You must update to the 3.22 capabilities.',
+      version === '3.22',
+      {
+        id: 'manager-capabilities.modifiers-3-13',
+        url: 'https://deprecations.emberjs.com/v3.x#toc_manager-capabilities-modifiers-3-13',
+        until: '4.0.0',
+        for: 'ember-source',
+        since: {
+          enabled: '3.26.0',
+        },
+      }
+    );
+
+    return glimmerModifierCapabilities(version, options);
+  };
 }

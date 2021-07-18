@@ -1,4 +1,7 @@
-import { AST, ASTPlugin, ASTPluginEnvironment } from '@glimmer/syntax';
+import { deprecate } from '@ember/debug';
+import { AST, ASTPlugin } from '@glimmer/syntax';
+import calculateLocationDisplay from '../system/calculate-location-display';
+import { EmberASTPluginEnvironment } from '../types';
 
 /**
  @module ember
@@ -24,10 +27,16 @@ import { AST, ASTPlugin, ASTPluginEnvironment } from '@glimmer/syntax';
   @class TransformAttrsToProps
 */
 
-export default function transformAttrsIntoArgs(env: ASTPluginEnvironment): ASTPlugin {
+export default function transformAttrsIntoArgs(env: EmberASTPluginEnvironment): ASTPlugin {
   let { builders: b } = env.syntax;
+  let moduleName = env.meta?.moduleName;
 
   let stack: string[][] = [[]];
+
+  function updateBlockParamsStack(blockParams: string[]) {
+    let parent = stack[stack.length - 1];
+    stack.push(parent.concat(blockParams));
+  }
 
   return {
     name: 'transform-attrs-into-args',
@@ -35,8 +44,16 @@ export default function transformAttrsIntoArgs(env: ASTPluginEnvironment): ASTPl
     visitor: {
       Program: {
         enter(node: AST.Program) {
-          let parent = stack[stack.length - 1];
-          stack.push(parent.concat(node.blockParams));
+          updateBlockParamsStack(node.blockParams);
+        },
+        exit() {
+          stack.pop();
+        },
+      },
+
+      ElementNode: {
+        enter(node: AST.ElementNode) {
+          updateBlockParamsStack(node.blockParams);
         },
         exit() {
           stack.pop();
@@ -45,7 +62,27 @@ export default function transformAttrsIntoArgs(env: ASTPluginEnvironment): ASTPl
 
       PathExpression(node: AST.PathExpression): AST.Node | void {
         if (isAttrs(node, stack[stack.length - 1])) {
-          let path = b.path(node.original.substr(6));
+          let path = b.path(node.original.substr(6)) as AST.PathExpression;
+
+          deprecate(
+            `Using {{attrs}} to reference named arguments has been deprecated. {{attrs.${
+              path.original
+            }}} should be updated to {{@${path.original}}}. ${calculateLocationDisplay(
+              moduleName,
+              node.loc
+            )}`,
+            false,
+            {
+              id: 'attrs-arg-access',
+              url: 'https://deprecations.emberjs.com/v3.x/#toc_attrs-arg-access',
+              until: '4.0.0',
+              for: 'ember-source',
+              since: {
+                enabled: '3.26.0',
+              },
+            }
+          );
+
           path.original = `@${path.original}`;
           path.data = true;
           return path;

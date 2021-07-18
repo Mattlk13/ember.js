@@ -1,11 +1,10 @@
 'use strict';
 
-const { readFileSync, existsSync } = require('fs');
+const { existsSync } = require('fs');
 const path = require('path');
 const Rollup = require('broccoli-rollup');
 const Funnel = require('broccoli-funnel');
 const MergeTrees = require('broccoli-merge-trees');
-const Babel = require('broccoli-babel-transpiler');
 const typescript = require('broccoli-typescript-compiler').default;
 const BroccoliDebug = require('broccoli-debug');
 const findLib = require('./find-lib');
@@ -18,7 +17,6 @@ const StringReplace = require('broccoli-string-replace');
 const GlimmerTemplatePrecompiler = require('./glimmer-template-compiler');
 const VERSION_PLACEHOLDER = /VERSION_STRING_PLACEHOLDER/g;
 const canaryFeatures = require('./canary-features');
-const injectNodeGlobals = require('./transforms/inject-node-globals');
 
 const debugTree = BroccoliDebug.buildDebugCallback('ember-source');
 
@@ -44,7 +42,7 @@ module.exports.jquery = function _jquery() {
   });
 };
 
-module.exports.internalLoader = function _internalLoader() {
+module.exports.loader = function _loader() {
   return new Funnel('packages/loader/lib', {
     files: ['index.js'],
     getDestinationPath() {
@@ -118,37 +116,18 @@ module.exports.getPackagesES = function getPackagesES() {
 };
 
 module.exports.handlebarsES = function _handlebars() {
-  return new Rollup(findLib('handlebars', 'lib'), {
-    annotation: 'handlebars',
+  return new Rollup(findLib('@handlebars/parser', 'dist/esm'), {
+    annotation: '@handlebars/parser',
     rollup: {
-      input: 'handlebars/compiler/base.js',
+      input: 'index.js',
       output: {
-        file: 'handlebars.js',
+        file: '@handlebars/parser/index.js',
         format: 'es',
         exports: 'named',
       },
-      plugins: [handlebarsFix()],
     },
   });
 };
-
-function handlebarsFix() {
-  let HANDLEBARS_PARSER = /[\/\\]parser.js$/;
-  return {
-    load: function(id) {
-      if (HANDLEBARS_PARSER.test(id)) {
-        let code = readFileSync(id, 'utf8');
-        return {
-          code: code
-            .replace('exports.__esModule = true;', '')
-            .replace("exports['default'] = handlebars;", 'export default handlebars;'),
-
-          map: { mappings: null },
-        };
-      }
-    },
-  };
-}
 
 module.exports.rsvpES = function _rsvpES() {
   let lib = path.resolve(path.dirname(require.resolve('rsvp')), '../lib');
@@ -221,11 +200,20 @@ const _glimmerTrees = new Map();
 function rollupGlimmerPackage(pkg) {
   let name = pkg.name;
   let tree = _glimmerTrees.get(name);
+
+  // @glimmer/debug and @glimmer/local-debug-flags are external dependencies,
+  // but exist in dev-dependencies because they are fully removed before
+  // publishing. Including them here allows Rollup to work for local builds.
+  let externalDeps = (pkg.dependencies || []).concat([
+    '@glimmer/debug',
+    '@glimmer/local-debug-flags',
+  ]);
+
   if (tree === undefined) {
     tree = new Rollup(pkg.module.dir, {
       rollup: {
         input: pkg.module.base,
-        external: pkg.dependencies,
+        external: externalDeps,
         output: {
           file: name + '.js',
           format: 'es',
@@ -241,20 +229,17 @@ function rollupGlimmerPackage(pkg) {
 function glimmerTrees(entries) {
   let seen = new Set();
 
-  // glimmer runtime has dependency on this even though it is only in tests
-  seen.add('@glimmer/object');
-  seen.add('@glimmer/object-reference');
-
   let trees = [];
   let queue = Array.isArray(entries) ? entries.slice() : [entries];
   let name;
+
   while ((name = queue.pop()) !== undefined) {
     if (seen.has(name)) {
       continue;
     }
     seen.add(name);
 
-    if (!name.startsWith('@glimmer/')) {
+    if (!name.startsWith('@glimmer/') && !name.startsWith('@simple-dom/')) {
       continue;
     }
 
@@ -269,14 +254,8 @@ function glimmerTrees(entries) {
       queue.push(...dependencies);
     }
   }
-  return new Babel(new MergeTrees(trees), {
-    sourceMaps: true,
-    plugins: [
-      // ensures `@glimmer/compiler` requiring `crypto` works properly
-      // in both browser and node-land
-      injectNodeGlobals,
-    ],
-  });
+
+  return new MergeTrees(trees);
 }
 
 module.exports.glimmerCompilerES = () => {
@@ -284,12 +263,20 @@ module.exports.glimmerCompilerES = () => {
 };
 
 module.exports.glimmerES = function glimmerES(environment) {
-  let glimmerEntries = ['@glimmer/node', '@glimmer/opcode-compiler', '@glimmer/runtime'];
+  let glimmerEntries = [
+    '@glimmer/node',
+    '@simple-dom/document',
+    '@glimmer/manager',
+    '@glimmer/destroyable',
+    '@glimmer/owner',
+    '@glimmer/opcode-compiler',
+    '@glimmer/runtime',
+  ];
 
   if (environment === 'development') {
     let hasGlimmerDebug = true;
     try {
-      require.resolve('@glimmer/debug');
+      require.resolve('@glimmer/debug'); // eslint-disable-line node/no-missing-require
     } catch (e) {
       hasGlimmerDebug = false;
     }

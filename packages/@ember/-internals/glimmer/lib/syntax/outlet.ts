@@ -1,47 +1,42 @@
-import { OwnedTemplateMeta } from '@ember/-internals/views';
-import { EMBER_ROUTING_MODEL_ARG } from '@ember/canary-features';
+import { Owner } from '@ember/-internals/owner';
+import { assert } from '@ember/debug';
 import { DEBUG } from '@glimmer/env';
-import { Option, unsafe } from '@glimmer/interfaces';
-import { OpcodeBuilder } from '@glimmer/opcode-compiler';
-import { ConstReference, Reference, Tag, VersionedPathReference } from '@glimmer/reference';
+import { CapturedArguments, CurriedType, DynamicScope } from '@glimmer/interfaces';
 import {
-  Arguments,
-  CapturedArguments,
-  CurriedComponentDefinition,
-  curry,
-  EMPTY_ARGS,
-  UNDEFINED_REFERENCE,
-  VM,
-} from '@glimmer/runtime';
-import { Dict, dict, Opaque } from '@glimmer/util';
-import * as WireFormat from '@glimmer/wire-format';
+  childRefFromParts,
+  createComputeRef,
+  createDebugAliasRef,
+  createPrimitiveRef,
+  Reference,
+  valueForRef,
+} from '@glimmer/reference';
+import { createCapturedArgs, CurriedValue, curry, EMPTY_POSITIONAL } from '@glimmer/runtime';
+import { dict } from '@glimmer/util';
 import { OutletComponentDefinition, OutletDefinitionState } from '../component-managers/outlet';
-import { DynamicScope } from '../renderer';
+import { internalHelper } from '../helpers/internal-helper';
 import { isTemplateFactory } from '../template';
-import { OutletReference, OutletState } from '../utils/outlet';
-import { NestedPropertyReference, PropertyReference } from '../utils/references';
+import { OutletState } from '../utils/outlet';
 
 /**
   The `{{outlet}}` helper lets you specify where a child route will render in
   your template. An important use of the `{{outlet}}` helper is in your
   application's `application.hbs` file:
 
-  ```handlebars
-  {{! app/templates/application.hbs }}
-  <!-- header content goes here, and will always display -->
+  ```app/templates/application.hbs
   <MyHeader />
+
   <div class="my-dynamic-content">
     <!-- this content will change based on the current route, which depends on the current URL -->
     {{outlet}}
   </div>
-  <!-- footer content goes here, and will always display -->
+
   <MyFooter />
   ```
 
   You may also specify a name for the `{{outlet}}`, which is useful when using more than one
   `{{outlet}}` in a template:
 
-  ```handlebars
+  ```app/templates/application.hbs
   {{outlet "menu"}}
   {{outlet "sidebar"}}
   {{outlet "main"}}
@@ -53,11 +48,11 @@ import { NestedPropertyReference, PropertyReference } from '../utils/references'
   ```app/routes/menu.js
   import Route from '@ember/routing/route';
 
-  export default Route.extend({
+  export default class MenuRoute extends Route {
     renderTemplate() {
       this.render({ outlet: 'menu' });
     }
-  });
+  }
   ```
 
   See the [routing guide](https://guides.emberjs.com/release/routing/rendering-a-template/) for more
@@ -69,139 +64,84 @@ import { NestedPropertyReference, PropertyReference } from '../utils/references'
   @for Ember.Templates.helpers
   @public
 */
-export function outletHelper(vm: VM, args: Arguments) {
-  let scope = vm.dynamicScope() as DynamicScope;
-  let nameRef: Reference<string>;
-  if (args.positional.length === 0) {
-    nameRef = new ConstReference('main');
-  } else {
-    nameRef = args.positional.at<VersionedPathReference<string>>(0);
-  }
-  return new OutletComponentReference(new OutletReference(scope.outletState, nameRef));
-}
+export const outletHelper = internalHelper(
+  (args: CapturedArguments, owner?: Owner, scope?: DynamicScope) => {
+    assert('Expected owner to be present, {{outlet}} requires an owner', owner);
+    assert(
+      'Expected dynamic scope to be present. You may have attempted to use the {{outlet}} keyword dynamically. This keyword cannot be used dynamically.',
+      scope
+    );
+    let nameRef: Reference<string>;
 
-export function outletMacro(
-  _name: string,
-  params: Option<WireFormat.Core.Params>,
-  hash: Option<WireFormat.Core.Hash>,
-  builder: OpcodeBuilder<OwnedTemplateMeta>
-) {
-  let expr: WireFormat.Expressions.Helper = [WireFormat.Ops.Helper, '-outlet', params || [], hash];
-  builder.dynamicComponent(expr, null, [], null, false, null, null);
-  return true;
-}
-
-class OutletModelReference implements VersionedPathReference {
-  public tag: Tag;
-
-  constructor(private parent: VersionedPathReference<OutletState | undefined>) {
-    this.tag = parent.tag;
-  }
-
-  value(): Opaque {
-    let state = this.parent.value();
-
-    if (state === undefined) {
-      return undefined;
-    }
-
-    let { render } = state;
-
-    if (render === undefined) {
-      return undefined;
-    }
-
-    return render.model as Opaque;
-  }
-
-  get(property: string): VersionedPathReference {
-    if (DEBUG) {
-      // This guarentees that we preserve the `debug()` output below
-      return new NestedPropertyReference(this, property);
+    if (args.positional.length === 0) {
+      nameRef = createPrimitiveRef('main');
     } else {
-      return PropertyReference.create(this, property);
+      nameRef = args.positional[0];
     }
+
+    let outletRef = createComputeRef(() => {
+      let state = valueForRef(scope.get('outletState') as Reference<OutletState | undefined>);
+      let outlets = state !== undefined ? state.outlets : undefined;
+
+      return outlets !== undefined ? outlets[valueForRef(nameRef)] : undefined;
+    });
+
+    let lastState: OutletDefinitionState | null = null;
+    let definition: CurriedValue | null = null;
+
+    return createComputeRef(() => {
+      let outletState = valueForRef(outletRef);
+      let state = stateFor(outletRef, outletState);
+
+      if (!validate(state, lastState)) {
+        lastState = state;
+
+        if (state !== null) {
+          let named = dict<Reference>();
+
+          // Create a ref for the model
+          let modelRef = childRefFromParts(outletRef, ['render', 'model']);
+
+          // Store the value of the model
+          let model = valueForRef(modelRef);
+
+          // Create a compute ref which we pass in as the `{{@model}}` reference
+          // for the outlet. This ref will update and return the value of the
+          // model _until_ the outlet itself changes. Once the outlet changes,
+          // dynamic scope also changes, and so the original model ref would not
+          // provide the correct updated value. So we stop updating and return
+          // the _last_ model value for that outlet.
+          named.model = createComputeRef(() => {
+            if (lastState === state) {
+              model = valueForRef(modelRef);
+            }
+
+            return model;
+          });
+
+          if (DEBUG) {
+            named.model = createDebugAliasRef!('@model', named.model);
+          }
+
+          let args = createCapturedArgs(named, EMPTY_POSITIONAL);
+          definition = curry(
+            CurriedType.Component,
+            new OutletComponentDefinition(state),
+            outletState?.render?.owner ?? owner,
+            args,
+            true
+          );
+        } else {
+          definition = null;
+        }
+      }
+
+      return definition;
+    });
   }
-}
+);
 
-if (DEBUG) {
-  OutletModelReference.prototype['debug'] = function debug(): string {
-    return '@model';
-  };
-}
-
-class OutletComponentReference
-  implements VersionedPathReference<CurriedComponentDefinition | null> {
-  public tag: Tag;
-  private args: Option<CapturedArguments> = null;
-  private definition: Option<CurriedComponentDefinition> = null;
-  private lastState: Option<OutletDefinitionState> = null;
-
-  constructor(private outletRef: VersionedPathReference<OutletState | undefined>) {
-    // The router always dirties the root state.
-    let tag = (this.tag = outletRef.tag);
-
-    if (EMBER_ROUTING_MODEL_ARG) {
-      let modelRef = new OutletModelReference(outletRef);
-      let map = dict<VersionedPathReference>();
-      map.model = modelRef;
-
-      // TODO: the functionailty to create a proper CapturedArgument should be
-      // exported by glimmer, or that it should provide an overload for `curry`
-      // that takes `PreparedArguments`
-      this.args = {
-        tag,
-        positional: EMPTY_ARGS.positional,
-        named: {
-          tag,
-          map,
-          names: ['model'],
-          references: [modelRef],
-          length: 1,
-          has(key: string): boolean {
-            return key === 'model';
-          },
-          get<T extends VersionedPathReference>(key: string): T {
-            return (key === 'model' ? modelRef : UNDEFINED_REFERENCE) as unsafe;
-          },
-          value(): Dict<Opaque> {
-            let model = modelRef.value();
-            return { model };
-          },
-        },
-        length: 1,
-        value() {
-          return {
-            named: this.named.value(),
-            positional: this.positional.value(),
-          };
-        },
-      };
-    }
-  }
-
-  value(): CurriedComponentDefinition | null {
-    let state = stateFor(this.outletRef);
-    if (validate(state, this.lastState)) {
-      return this.definition;
-    }
-    this.lastState = state;
-    let definition = null;
-    if (state !== null) {
-      definition = curry(new OutletComponentDefinition(state), this.args);
-    }
-    return (this.definition = definition);
-  }
-
-  get(_key: string) {
-    return UNDEFINED_REFERENCE;
-  }
-}
-
-function stateFor(
-  ref: VersionedPathReference<OutletState | undefined>
-): OutletDefinitionState | null {
-  let outlet = ref.value();
+function stateFor(ref: Reference, outlet: OutletState | undefined): OutletDefinitionState | null {
   if (outlet === undefined) return null;
   let render = outlet.render;
   if (render === undefined) return null;

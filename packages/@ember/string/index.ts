@@ -6,28 +6,35 @@ export { getStrings as _getStrings, setStrings as _setStrings } from './lib/stri
 
 import { ENV } from '@ember/-internals/environment';
 import { Cache } from '@ember/-internals/utils';
+import { deprecate } from '@ember/debug';
 import { getString } from './lib/string_registry';
+
+import {
+  htmlSafe as internalHtmlSafe,
+  isHTMLSafe as internalIsHtmlSafe,
+  SafeString,
+} from '@ember/-internals/glimmer';
 
 const STRING_DASHERIZE_REGEXP = /[ _]/g;
 
-const STRING_DASHERIZE_CACHE = new Cache<string, string>(1000, key =>
+const STRING_DASHERIZE_CACHE = new Cache<string, string>(1000, (key) =>
   decamelize(key).replace(STRING_DASHERIZE_REGEXP, '-')
 );
 
-const STRING_CAMELIZE_REGEXP_1 = /(\-|\_|\.|\s)+(.)?/g;
+const STRING_CAMELIZE_REGEXP_1 = /(-|_|\.|\s)+(.)?/g;
 const STRING_CAMELIZE_REGEXP_2 = /(^|\/)([A-Z])/g;
 
-const CAMELIZE_CACHE = new Cache<string, string>(1000, key =>
+const CAMELIZE_CACHE = new Cache<string, string>(1000, (key) =>
   key
     .replace(STRING_CAMELIZE_REGEXP_1, (_match, _separator, chr) => (chr ? chr.toUpperCase() : ''))
     .replace(STRING_CAMELIZE_REGEXP_2, (match /*, separator, chr */) => match.toLowerCase())
 );
 
-const STRING_CLASSIFY_REGEXP_1 = /^(\-|_)+(.)?/;
-const STRING_CLASSIFY_REGEXP_2 = /(.)(\-|\_|\.|\s)+(.)?/g;
+const STRING_CLASSIFY_REGEXP_1 = /^(-|_)+(.)?/;
+const STRING_CLASSIFY_REGEXP_2 = /(.)(-|_|\.|\s)+(.)?/g;
 const STRING_CLASSIFY_REGEXP_3 = /(^|\/|\.)([a-z])/g;
 
-const CLASSIFY_CACHE = new Cache<string, string>(1000, str => {
+const CLASSIFY_CACHE = new Cache<string, string>(1000, (str) => {
   let replace1 = (_match: string, _separator: string, chr: string) =>
     chr ? `_${chr.toUpperCase()}` : '';
   let replace2 = (_match: string, initialChar: string, _separator: string, chr: string) =>
@@ -44,9 +51,9 @@ const CLASSIFY_CACHE = new Cache<string, string>(1000, str => {
 });
 
 const STRING_UNDERSCORE_REGEXP_1 = /([a-z\d])([A-Z]+)/g;
-const STRING_UNDERSCORE_REGEXP_2 = /\-|\s+/g;
+const STRING_UNDERSCORE_REGEXP_2 = /-|\s+/g;
 
-const UNDERSCORE_CACHE = new Cache<string, string>(1000, str =>
+const UNDERSCORE_CACHE = new Cache<string, string>(1000, (str) =>
   str
     .replace(STRING_UNDERSCORE_REGEXP_1, '$1_$2')
     .replace(STRING_UNDERSCORE_REGEXP_2, '_')
@@ -55,13 +62,13 @@ const UNDERSCORE_CACHE = new Cache<string, string>(1000, str =>
 
 const STRING_CAPITALIZE_REGEXP = /(^|\/)([a-z\u00C0-\u024F])/g;
 
-const CAPITALIZE_CACHE = new Cache<string, string>(1000, str =>
+const CAPITALIZE_CACHE = new Cache<string, string>(1000, (str) =>
   str.replace(STRING_CAPITALIZE_REGEXP, (match /*, separator, chr */) => match.toUpperCase())
 );
 
 const STRING_DECAMELIZE_REGEXP = /([a-z\d])([A-Z])/g;
 
-const DECAMELIZE_CACHE = new Cache<string, string>(1000, str =>
+const DECAMELIZE_CACHE = new Cache<string, string>(1000, (str) =>
   str.replace(STRING_DECAMELIZE_REGEXP, '$1_$2').toLowerCase()
 );
 
@@ -109,8 +116,23 @@ function _fmt(str: string, formats: any[]) {
   @param {Array} formats Optional array of parameters to interpolate into string.
   @return {String} formatted string
   @public
+  @deprecated
 */
 export function loc(str: string, formats: any[]): string {
+  deprecate(
+    'loc is deprecated, please use a dedicated localization solution like ember-intl. More alternatives listed at https://emberobserver.com/categories/internationalization.',
+    false,
+    {
+      id: 'ember-string.loc',
+      until: '4.0.0',
+      for: 'ember-source',
+      url: 'https://deprecations.emberjs.com/v3.x#toc_ember-string-loc',
+      since: {
+        enabled: '3.24',
+      },
+    }
+  );
+
   if (!Array.isArray(formats) || arguments.length > 2) {
     formats = Array.prototype.slice.call(arguments, 1);
   }
@@ -278,7 +300,56 @@ export function capitalize(str: string): string {
   return CAPITALIZE_CACHE.get(str);
 }
 
+function deprecateImportFromString(
+  name: string,
+  message = `Importing ${name} from '@ember/string' is deprecated. Please import ${name} from '@ember/template' instead.`
+) {
+  // Disabling this deprecation due to unintended errors in 3.25
+  // See https://github.com/emberjs/ember.js/issues/19393 fo more information.
+  deprecate(message, true, {
+    id: 'ember-string.htmlsafe-ishtmlsafe',
+    for: 'ember-source',
+    since: {
+      enabled: '3.25',
+    },
+    until: '4.0.0',
+    url: 'https://deprecations.emberjs.com/v3.x/#toc_ember-string-htmlsafe-ishtmlsafe',
+  });
+}
+
+export function htmlSafe(str: string): SafeString {
+  deprecateImportFromString('htmlSafe');
+
+  return internalHtmlSafe(str);
+}
+
+export function isHTMLSafe(str: any | null | undefined): str is SafeString {
+  deprecateImportFromString('isHTMLSafe');
+
+  return internalIsHtmlSafe(str);
+}
+
 if (ENV.EXTEND_PROTOTYPES.String) {
+  let deprecateEmberStringPrototypeExtension = function (
+    name: string,
+    fn: (utility: string, ...options: any) => string | string[],
+    message = `String prototype extensions are deprecated. Please import ${name} from '@ember/string' instead.`
+  ) {
+    return function (this: string) {
+      deprecate(message, false, {
+        id: 'ember-string.prototype-extensions',
+        for: 'ember-source',
+        since: {
+          enabled: '3.24',
+        },
+        until: '4.0.0',
+        url: 'https://deprecations.emberjs.com/v3.x/#toc_ember-string-prototype_extensions',
+      });
+
+      return fn(this, ...arguments);
+    };
+  };
+
   Object.defineProperties(String.prototype, {
     /**
       See [String.w](/ember/release/classes/String/methods/w?anchor=w).
@@ -287,14 +358,13 @@ if (ENV.EXTEND_PROTOTYPES.String) {
       @for @ember/string
       @static
       @private
+      @deprecated
     */
     w: {
       configurable: true,
       enumerable: false,
       writeable: true,
-      value() {
-        return w(this);
-      },
+      value: deprecateEmberStringPrototypeExtension('w', w),
     },
 
     /**
@@ -304,6 +374,7 @@ if (ENV.EXTEND_PROTOTYPES.String) {
       @for @ember/string
       @static
       @private
+      @deprecated
     */
     loc: {
       configurable: true,
@@ -321,14 +392,13 @@ if (ENV.EXTEND_PROTOTYPES.String) {
       @for @ember/string
       @static
       @private
+      @deprecated
     */
     camelize: {
       configurable: true,
       enumerable: false,
       writeable: true,
-      value() {
-        return camelize(this);
-      },
+      value: deprecateEmberStringPrototypeExtension('camelize', camelize),
     },
 
     /**
@@ -338,14 +408,13 @@ if (ENV.EXTEND_PROTOTYPES.String) {
       @for @ember/string
       @static
       @private
+      @deprecated
     */
     decamelize: {
       configurable: true,
       enumerable: false,
       writeable: true,
-      value() {
-        return decamelize(this);
-      },
+      value: deprecateEmberStringPrototypeExtension('decamelize', decamelize),
     },
 
     /**
@@ -355,14 +424,13 @@ if (ENV.EXTEND_PROTOTYPES.String) {
       @for @ember/string
       @static
       @private
+      @deprecated
     */
     dasherize: {
       configurable: true,
       enumerable: false,
       writeable: true,
-      value() {
-        return dasherize(this);
-      },
+      value: deprecateEmberStringPrototypeExtension('dasherize', dasherize),
     },
 
     /**
@@ -372,14 +440,13 @@ if (ENV.EXTEND_PROTOTYPES.String) {
       @for @ember/string
       @static
       @private
+      @deprecated
     */
     underscore: {
       configurable: true,
       enumerable: false,
       writeable: true,
-      value() {
-        return underscore(this);
-      },
+      value: deprecateEmberStringPrototypeExtension('underscore', underscore),
     },
 
     /**
@@ -389,14 +456,13 @@ if (ENV.EXTEND_PROTOTYPES.String) {
       @for @ember/string
       @static
       @private
+      @deprecated
     */
     classify: {
       configurable: true,
       enumerable: false,
       writeable: true,
-      value() {
-        return classify(this);
-      },
+      value: deprecateEmberStringPrototypeExtension('classify', classify),
     },
 
     /**
@@ -406,14 +472,13 @@ if (ENV.EXTEND_PROTOTYPES.String) {
       @for @ember/string
       @static
       @private
+      @deprecated
     */
     capitalize: {
       configurable: true,
       enumerable: false,
       writeable: true,
-      value() {
-        return capitalize(this);
-      },
+      value: deprecateEmberStringPrototypeExtension('capitalize', capitalize),
     },
   });
 }

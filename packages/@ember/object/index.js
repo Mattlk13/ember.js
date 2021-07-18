@@ -1,6 +1,152 @@
-import { assert } from '@ember/debug';
-import { assign } from '@ember/polyfills';
+import { DEBUG } from '@glimmer/env';
+import { assert, deprecate } from '@ember/debug';
 import { isElementDescriptor, setClassicDecorator } from '@ember/-internals/metal';
+import { onComputedDotAccess } from '@ember/-internals/overrides';
+
+export { Object as default } from '@ember/-internals/runtime';
+
+export {
+  notifyPropertyChange,
+  defineProperty,
+  get,
+  set,
+  getProperties,
+  setProperties,
+  getWithDefault,
+  observer,
+  computed,
+  trySet,
+} from '@ember/-internals/metal';
+
+import { computed } from '@ember/-internals/metal';
+
+import {
+  alias,
+  and,
+  bool,
+  collect,
+  deprecatingAlias,
+  empty,
+  equal,
+  filterBy,
+  filter,
+  gte,
+  gt,
+  intersect,
+  lte,
+  lt,
+  mapBy,
+  map,
+  match,
+  max,
+  min,
+  none,
+  notEmpty,
+  not,
+  oneWay,
+  or,
+  readOnly,
+  setDiff,
+  sort,
+  sum,
+  union,
+  uniqBy,
+  uniq,
+} from '@ember/object/computed';
+
+// eslint-disable-next-line no-undef
+if (DEBUG) {
+  let defaultHandler = (dotKey, importKey, module) => {
+    return `Using \`${dotKey}\` has been deprecated. Instead, import the value directly from ${module}:\n\n  import { ${importKey} } from '${module}';`;
+  };
+
+  let handler = onComputedDotAccess || defaultHandler;
+
+  let defineDeprecatedComputedFunc = (key, func) => {
+    Object.defineProperty(computed, key, {
+      get() {
+        let message = handler(`computed.${key}`, key, '@ember/object/computed');
+
+        deprecate(message, message === null, {
+          id: 'deprecated-run-loop-and-computed-dot-access',
+          until: '4.0.0',
+          for: 'ember-source',
+          since: {
+            enabled: '3.27.0',
+          },
+        });
+
+        return func;
+      },
+    });
+  };
+
+  defineDeprecatedComputedFunc('alias', alias);
+  defineDeprecatedComputedFunc('and', and);
+  defineDeprecatedComputedFunc('bool', bool);
+  defineDeprecatedComputedFunc('collect', collect);
+  defineDeprecatedComputedFunc('deprecatingAlias', deprecatingAlias);
+  defineDeprecatedComputedFunc('empty', empty);
+  defineDeprecatedComputedFunc('equal', equal);
+  defineDeprecatedComputedFunc('filterBy', filterBy);
+  defineDeprecatedComputedFunc('filter', filter);
+  defineDeprecatedComputedFunc('gte', gte);
+  defineDeprecatedComputedFunc('gt', gt);
+  defineDeprecatedComputedFunc('intersect', intersect);
+  defineDeprecatedComputedFunc('lte', lte);
+  defineDeprecatedComputedFunc('lt', lt);
+  defineDeprecatedComputedFunc('mapBy', mapBy);
+  defineDeprecatedComputedFunc('map', map);
+  defineDeprecatedComputedFunc('match', match);
+  defineDeprecatedComputedFunc('max', max);
+  defineDeprecatedComputedFunc('min', min);
+  defineDeprecatedComputedFunc('none', none);
+  defineDeprecatedComputedFunc('notEmpty', notEmpty);
+  defineDeprecatedComputedFunc('not', not);
+  defineDeprecatedComputedFunc('oneWay', oneWay);
+  defineDeprecatedComputedFunc('reads', oneWay);
+  defineDeprecatedComputedFunc('or', or);
+  defineDeprecatedComputedFunc('readOnly', readOnly);
+  defineDeprecatedComputedFunc('setDiff', setDiff);
+  defineDeprecatedComputedFunc('sort', sort);
+  defineDeprecatedComputedFunc('sum', sum);
+  defineDeprecatedComputedFunc('union', union);
+  defineDeprecatedComputedFunc('uniqBy', uniqBy);
+  defineDeprecatedComputedFunc('uniq', uniq);
+} else {
+  computed.alias = alias;
+  computed.and = and;
+  computed.bool = bool;
+  computed.collect = collect;
+  computed.deprecatingAlias = deprecatingAlias;
+  computed.empty = empty;
+  computed.equal = equal;
+  computed.filterBy = filterBy;
+  computed.filter = filter;
+  computed.gte = gte;
+  computed.gt = gt;
+  computed.intersect = intersect;
+  computed.lte = lte;
+  computed.lt = lt;
+  computed.mapBy = mapBy;
+  computed.map = map;
+  computed.match = match;
+  computed.max = max;
+  computed.min = min;
+  computed.none = none;
+  computed.notEmpty = notEmpty;
+  computed.not = not;
+  computed.oneWay = oneWay;
+  computed.reads = oneWay;
+  computed.or = or;
+  computed.readOnly = readOnly;
+  computed.setDiff = setDiff;
+  computed.sort = sort;
+  computed.sum = sum;
+  computed.union = union;
+  computed.uniqBy = uniqBy;
+  computed.uniq = uniq;
+}
 
 /**
   Decorator that turns the target function into an Action which can be accessed
@@ -106,12 +252,13 @@ import { isElementDescriptor, setClassicDecorator } from '@ember/-internals/meta
   They also do not have equivalents in JavaScript directly, so they cannot be
   used for other situations where binding would be useful.
 
+  @public
   @method action
   @for @ember/object
   @static
-  @param {} elementDesc the descriptor of the element to decorate
-  @return {ElementDescriptor} the decorated descriptor
-  @private
+  @param {Function|undefined} callback The function to turn into an action,
+                                       when used in classic classes
+  @return {PropertyDecorator} property decorator instance
 */
 
 const BINDINGS_MAP = new WeakMap();
@@ -121,10 +268,10 @@ function setupAction(target, key, actionFn) {
     target.constructor.proto();
   }
 
-  if (!target.hasOwnProperty('actions')) {
+  if (!Object.prototype.hasOwnProperty.call(target, 'actions')) {
     let parentActions = target.actions;
     // we need to assign because of the way mixins copy actions down when inheriting
-    target.actions = parentActions ? assign({}, parentActions) : {};
+    target.actions = parentActions ? Object.assign({}, parentActions) : {};
   }
 
   target.actions[key] = actionFn;
@@ -156,7 +303,7 @@ export function action(target, key, desc) {
   if (!isElementDescriptor([target, key, desc])) {
     actionFn = target;
 
-    let decorator = function(target, key, desc, meta, isClassicDecorator) {
+    let decorator = function (target, key, desc, meta, isClassicDecorator) {
       assert(
         'The @action decorator may only be passed a method when used in classic classes. You should decorate methods directly in native classes',
         isClassicDecorator

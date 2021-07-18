@@ -2,16 +2,23 @@
 @module @ember/component
 */
 
-import { Factory } from '@ember/-internals/owner';
-import { FrameworkObject, setFrameworkClass } from '@ember/-internals/runtime';
-import { symbol } from '@ember/-internals/utils';
+import { Factory, Owner, setOwner } from '@ember/-internals/owner';
+import { FrameworkObject } from '@ember/-internals/runtime';
+import { getDebugName, symbol } from '@ember/-internals/utils';
 import { join } from '@ember/runloop';
-import { Dict, Opaque } from '@glimmer/interfaces';
-import { createTag, dirty } from '@glimmer/reference';
+import { DEBUG } from '@glimmer/env';
+import { Arguments, Dict, HelperManager } from '@glimmer/interfaces';
+import { getInternalHelperManager, helperCapabilities, setHelperManager } from '@glimmer/manager';
+import {
+  consumeTag,
+  createTag,
+  deprecateMutationsInTrackingTransaction,
+  dirtyTag,
+} from '@glimmer/validator';
 
 export const RECOMPUTE_TAG = symbol('RECOMPUTE_TAG');
 
-export type HelperFunction = (positional: Opaque[], named: Dict<Opaque>) => Opaque;
+export type HelperFunction<T = unknown> = (positional: unknown[], named: Dict<unknown>) => T;
 
 export type SimpleHelperFactory = Factory<SimpleHelper, HelperFactory<SimpleHelper>>;
 export type ClassHelperFactory = Factory<HelperInstance, HelperFactory<HelperInstance>>;
@@ -21,25 +28,13 @@ export interface HelperFactory<T> {
   create(): T;
 }
 
-export interface HelperInstance {
-  compute(positional: Opaque[], named: Dict<Opaque>): Opaque;
+export interface HelperInstance<T = unknown> {
+  compute(positional: unknown[], named: Dict<unknown>): T;
   destroy(): void;
 }
 
-export interface SimpleHelper {
-  compute: HelperFunction;
-}
-
-export function isHelperFactory(
-  helper: any | undefined | null
-): helper is SimpleHelperFactory | ClassHelperFactory {
-  return (
-    typeof helper === 'object' && helper !== null && helper.class && helper.class.isHelperFactory
-  );
-}
-
-export function isSimpleHelper(helper: SimpleHelper | HelperInstance): helper is SimpleHelper {
-  return (helper as any).destroy === undefined;
+export interface SimpleHelper<T = unknown> {
+  compute: HelperFunction<T>;
 }
 
 /**
@@ -83,6 +78,7 @@ export function isSimpleHelper(helper: SimpleHelper | HelperInstance): helper is
   Additionally, class helpers can call `recompute` to force a new computation.
 
   @class Helper
+  @extends CoreObject
   @public
   @since 1.13.0
 */
@@ -122,7 +118,7 @@ let Helper = FrameworkObject.extend({
     @since 1.13.0
   */
   recompute() {
-    join(() => dirty(this[RECOMPUTE_TAG]));
+    join(() => dirtyTag(this[RECOMPUTE_TAG]));
   },
 
   /**
@@ -136,9 +132,77 @@ let Helper = FrameworkObject.extend({
   */
 });
 
-Helper.isHelperFactory = true;
+const IS_CLASSIC_HELPER = symbol('IS_CLASSIC_HELPER');
 
-setFrameworkClass(Helper);
+Helper.isHelperFactory = true;
+Helper[IS_CLASSIC_HELPER] = true;
+
+export function isClassicHelper(obj: object): boolean {
+  return obj[IS_CLASSIC_HELPER] === true;
+}
+
+interface ClassicHelperStateBucket {
+  instance: HelperInstance;
+  args: Arguments;
+}
+
+class ClassicHelperManager implements HelperManager<ClassicHelperStateBucket> {
+  capabilities = helperCapabilities('3.23', {
+    hasValue: true,
+    hasDestroyable: true,
+  });
+
+  private ownerInjection: object;
+
+  constructor(owner: Owner | undefined) {
+    let ownerInjection = {};
+    setOwner(ownerInjection, owner!);
+    this.ownerInjection = ownerInjection;
+  }
+
+  createHelper(definition: typeof Helper, args: Arguments) {
+    let instance =
+      definition.class === undefined ? definition.create(this.ownerInjection) : definition.create();
+
+    return {
+      instance,
+      args,
+    };
+  }
+
+  getDestroyable({ instance }: ClassicHelperStateBucket) {
+    return instance;
+  }
+
+  getValue({ instance, args }: ClassicHelperStateBucket) {
+    let ret;
+    let { positional, named } = args;
+
+    if (DEBUG) {
+      deprecateMutationsInTrackingTransaction!(() => {
+        ret = instance.compute(positional as unknown[], named);
+      });
+    } else {
+      ret = instance.compute(positional as unknown[], named);
+    }
+
+    consumeTag(instance[RECOMPUTE_TAG]);
+
+    return ret;
+  }
+
+  getDebugName(definition: ClassHelperFactory) {
+    return getDebugName!(definition.class!['prototype']);
+  }
+}
+
+setHelperManager((owner: Owner | undefined): ClassicHelperManager => {
+  return new ClassicHelperManager(owner);
+}, Helper);
+
+export const CLASSIC_HELPER_MANAGER = getInternalHelperManager(Helper);
+
+///////////
 
 class Wrapper implements HelperFactory<SimpleHelper> {
   isHelperFactory: true = true;
@@ -152,6 +216,42 @@ class Wrapper implements HelperFactory<SimpleHelper> {
     };
   }
 }
+
+class SimpleClassicHelperManager implements HelperManager<() => unknown> {
+  capabilities = helperCapabilities('3.23', {
+    hasValue: true,
+  });
+
+  createHelper(definition: Wrapper, args: Arguments) {
+    let { compute } = definition;
+
+    if (DEBUG) {
+      return () => {
+        let ret;
+
+        deprecateMutationsInTrackingTransaction!(() => {
+          ret = compute.call(null, args.positional as unknown[], args.named);
+        });
+
+        return ret;
+      };
+    }
+
+    return () => compute.call(null, args.positional as unknown[], args.named);
+  }
+
+  getValue(fn: () => unknown) {
+    return fn();
+  }
+
+  getDebugName(definition: Wrapper) {
+    return getDebugName!(definition.compute);
+  }
+}
+
+export const SIMPLE_CLASSIC_HELPER_MANAGER = new SimpleClassicHelperManager();
+
+setHelperManager(() => SIMPLE_CLASSIC_HELPER_MANAGER, Wrapper.prototype);
 
 /**
   In many cases it is not necessary to use the full `Helper` class.

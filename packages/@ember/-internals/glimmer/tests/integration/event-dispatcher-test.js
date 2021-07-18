@@ -1,7 +1,7 @@
 import { RenderingTestCase, moduleFor, runTask } from 'internal-test-helpers';
 
 import { Component } from '../utils/helpers';
-import { getCurrentRunLoop, run } from '@ember/runloop';
+import { _getCurrentRunLoop } from '@ember/runloop';
 import {
   subscribe as instrumentationSubscribe,
   reset as instrumentationReset,
@@ -20,9 +20,108 @@ function fireNativeWithDataTransfer(node, type, dataTransfer) {
   node.dispatchEvent(event);
 }
 
+function triggerEvent(node, event) {
+  switch (event) {
+    case 'focusin':
+      return node.focus();
+    case 'focusout':
+      return node.blur();
+    default:
+      return node.trigger(event);
+  }
+}
+
+const SUPPORTED_EMBER_EVENTS = {
+  touchstart: 'touchStart',
+  touchmove: 'touchMove',
+  touchend: 'touchEnd',
+  touchcancel: 'touchCancel',
+  keydown: 'keyDown',
+  keyup: 'keyUp',
+  keypress: 'keyPress',
+  mousedown: 'mouseDown',
+  mouseup: 'mouseUp',
+  contextmenu: 'contextMenu',
+  click: 'click',
+  dblclick: 'doubleClick',
+  focusin: 'focusIn',
+  focusout: 'focusOut',
+  submit: 'submit',
+  input: 'input',
+  change: 'change',
+  dragstart: 'dragStart',
+  drag: 'drag',
+  dragenter: 'dragEnter',
+  dragleave: 'dragLeave',
+  dragover: 'dragOver',
+  drop: 'drop',
+  dragend: 'dragEnd',
+};
+
 moduleFor(
   'EventDispatcher',
   class extends RenderingTestCase {
+    ['@test event handler methods are called when event is triggered'](assert) {
+      let receivedEvent;
+      let browserEvent;
+
+      this.registerComponent('x-button', {
+        ComponentClass: Component.extend(
+          {
+            tagName: 'button',
+          },
+          Object.keys(SUPPORTED_EMBER_EVENTS)
+            .map((browerEvent) => ({
+              [SUPPORTED_EMBER_EVENTS[browerEvent]](event) {
+                receivedEvent = event;
+              },
+            }))
+            .reduce((result, singleEventHandler) => ({ ...result, ...singleEventHandler }), {})
+        ),
+      });
+
+      this.render(`{{x-button}}`);
+
+      let elementNode = this.$('button');
+      let element = elementNode[0];
+
+      for (browserEvent in SUPPORTED_EMBER_EVENTS) {
+        receivedEvent = null;
+        runTask(() => triggerEvent(elementNode, browserEvent));
+        assert.ok(receivedEvent, `${browserEvent} event was triggered`);
+        assert.strictEqual(receivedEvent.target, element);
+      }
+    }
+
+    ['@test event listeners are called when event is triggered'](assert) {
+      let receivedEvent;
+      let browserEvent;
+
+      this.registerComponent('x-button', {
+        ComponentClass: Component.extend({
+          tagName: 'button',
+          init() {
+            this._super();
+            Object.keys(SUPPORTED_EMBER_EVENTS).forEach((browserEvent) => {
+              this.on(SUPPORTED_EMBER_EVENTS[browserEvent], (event) => (receivedEvent = event));
+            });
+          },
+        }),
+      });
+
+      this.render(`{{x-button}}`);
+
+      let elementNode = this.$('button');
+      let element = elementNode[0];
+
+      for (browserEvent in SUPPORTED_EMBER_EVENTS) {
+        receivedEvent = null;
+        runTask(() => triggerEvent(elementNode, browserEvent));
+        assert.ok(receivedEvent, `${browserEvent} event was triggered`);
+        assert.strictEqual(receivedEvent.target, element);
+      }
+    }
+
     ['@test events bubble view hierarchy for form elements'](assert) {
       let receivedEvent;
 
@@ -51,7 +150,7 @@ moduleFor(
             receivedEvent = event;
           },
         }),
-        template: `<button id="is-done" onclick={{action clicked}}>my button</button>`,
+        template: `<button id="is-done" onclick={{action this.clicked}}>my button</button>`,
       });
 
       this.render(`{{x-bar}}`);
@@ -70,7 +169,7 @@ moduleFor(
             receivedEvent = event;
           },
         }),
-        template: `<button id="is-done" onClick={{action clicked}}>my button</button>`,
+        template: `<button id="is-done" onClick={{action this.clicked}}>my button</button>`,
       });
 
       this.render(`{{x-bar}}`);
@@ -164,7 +263,7 @@ moduleFor(
       this.registerComponent('x-foo', {
         ComponentClass: Component.extend({
           change() {
-            assert.ok(getCurrentRunLoop(), 'a run loop should have started');
+            assert.ok(_getCurrentRunLoop(), 'a run loop should have started');
           },
         }),
         template: `<input id="is-done" type="checkbox">`,
@@ -403,7 +502,7 @@ moduleFor(
       });
 
       expectDeprecation(
-        'Using `mouseMove` event handler methods in components has been deprecated.'
+        /Using `mouseMove` event handler methods in components has been deprecated\./
       );
 
       this.render(`{{x-foo}}`);
@@ -420,10 +519,13 @@ moduleFor(
     constructor() {
       super(...arguments);
 
-      let dispatcher = this.owner.lookup('event_dispatcher:main');
-      run(dispatcher, 'destroy');
-      this.owner.__container__.reset('event_dispatcher:main');
       this.dispatcher = this.owner.lookup('event_dispatcher:main');
+    }
+
+    getBootOptions() {
+      return {
+        skipEventDispatcher: true,
+      };
     }
 
     ['@test additional events can be specified'](assert) {
@@ -621,11 +723,11 @@ if (jQueryDisabled) {
     'EventDispatcher#jquery-events',
     class extends RenderingTestCase {
       beforeEach() {
-        this.jqueryIntegration = window.ENV._JQUERY_INTEGRATION;
+        this.jqueryIntegration = window.EmberENV._JQUERY_INTEGRATION;
       }
 
       afterEach() {
-        window.ENV._JQUERY_INTEGRATION = this.jqueryIntegration;
+        window.EmberENV._JQUERY_INTEGRATION = this.jqueryIntegration;
       }
 
       ['@test jQuery events are passed when jQuery is present'](assert) {
@@ -699,7 +801,7 @@ if (jQueryDisabled) {
         assert
       ) {
         let receivedEvent;
-        window.ENV._JQUERY_INTEGRATION = true;
+        window.EmberENV._JQUERY_INTEGRATION = true;
 
         this.registerComponent('x-foo', {
           ComponentClass: Component.extend({

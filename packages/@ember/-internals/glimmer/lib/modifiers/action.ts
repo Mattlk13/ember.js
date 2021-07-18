@@ -1,19 +1,22 @@
+import { Owner } from '@ember/-internals/owner';
 import { uuid } from '@ember/-internals/utils';
-import { ActionManager, isSimpleClick } from '@ember/-internals/views';
+import { ActionManager, EventDispatcher, isSimpleClick } from '@ember/-internals/views';
 import { assert, deprecate } from '@ember/debug';
 import { flaggedInstrument } from '@ember/instrumentation';
 import { join } from '@ember/runloop';
-import { Opaque, Simple } from '@glimmer/interfaces';
-import { Tag } from '@glimmer/reference';
+import { registerDestructor } from '@glimmer/destroyable';
+import { DEBUG } from '@glimmer/env';
 import {
-  Arguments,
+  CapturedArguments,
   CapturedNamedArguments,
   CapturedPositionalArguments,
-  DynamicScope,
-  ModifierManager,
-} from '@glimmer/runtime';
-import { Destroyable } from '@glimmer/util';
-import { INVOKE } from '../utils/references';
+  InternalModifierManager,
+} from '@glimmer/interfaces';
+import { setInternalModifierManager } from '@glimmer/manager';
+import { isInvokableRef, updateRef, valueForRef } from '@glimmer/reference';
+import { createUpdatableTag, UpdatableTag } from '@glimmer/validator';
+import { SimpleElement } from '@simple-dom/interface';
+import { INVOKE } from '../helpers/action';
 
 const MODIFIERS = ['alt', 'shift', 'meta', 'ctrl'];
 const POINTER_EVENT_TYPE_REGEX = /^click|mouse|touch/;
@@ -61,80 +64,76 @@ export let ActionHelper = {
 };
 
 export class ActionState {
-  public element: Simple.Element;
+  public element: SimpleElement;
+  public owner: Owner;
   public actionId: number;
   public actionName: any;
   public actionArgs: any;
   public namedArgs: CapturedNamedArguments;
   public positional: CapturedPositionalArguments;
   public implicitTarget: any;
-  public dom: any;
   public eventName: any;
-  public tag: Tag;
+  public tag = createUpdatableTag();
 
   constructor(
-    element: Simple.Element,
+    element: SimpleElement,
+    owner: Owner,
     actionId: number,
-    actionName: any,
     actionArgs: any[],
     namedArgs: CapturedNamedArguments,
-    positionalArgs: CapturedPositionalArguments,
-    implicitTarget: any,
-    dom: any,
-    tag: Tag
+    positionalArgs: CapturedPositionalArguments
   ) {
     this.element = element;
+    this.owner = owner;
     this.actionId = actionId;
-    this.actionName = actionName;
     this.actionArgs = actionArgs;
     this.namedArgs = namedArgs;
     this.positional = positionalArgs;
-    this.implicitTarget = implicitTarget;
-    this.dom = dom;
     this.eventName = this.getEventName();
-    this.tag = tag;
+
+    registerDestructor(this, () => ActionHelper.unregisterAction(this));
   }
 
   getEventName() {
-    return this.namedArgs.get('on').value() || 'click';
+    let { on } = this.namedArgs;
+
+    return on !== undefined ? valueForRef(on) : 'click';
   }
 
   getActionArgs() {
     let result = new Array(this.actionArgs.length);
 
     for (let i = 0; i < this.actionArgs.length; i++) {
-      result[i] = this.actionArgs[i].value();
+      result[i] = valueForRef(this.actionArgs[i]);
     }
 
     return result;
   }
 
-  getTarget() {
+  getTarget(): any {
     let { implicitTarget, namedArgs } = this;
-    let target;
+    let { target } = namedArgs;
 
-    if (namedArgs.has('target')) {
-      target = namedArgs.get('target').value();
-    } else {
-      target = implicitTarget.value();
-    }
-
-    return target;
+    return target !== undefined ? valueForRef(target) : valueForRef(implicitTarget);
   }
 
   handler(event: Event): boolean {
     let { actionName, namedArgs } = this;
-    let bubbles = namedArgs.get('bubbles');
-    let preventDefault = namedArgs.get('preventDefault');
-    let allowedKeys = namedArgs.get('allowedKeys');
-    let target = this.getTarget();
-    let shouldBubble = bubbles.value() !== false;
+    let { bubbles, preventDefault, allowedKeys } = namedArgs;
 
-    if (!isAllowedEvent(event, allowedKeys.value())) {
+    let bubblesVal = bubbles !== undefined ? valueForRef(bubbles) : undefined;
+    let preventDefaultVal = preventDefault !== undefined ? valueForRef(preventDefault) : undefined;
+    let allowedKeysVal = allowedKeys !== undefined ? valueForRef(allowedKeys) : undefined;
+
+    let target = this.getTarget();
+
+    let shouldBubble = bubblesVal !== false;
+
+    if (!isAllowedEvent(event, allowedKeysVal)) {
       return true;
     }
 
-    if (preventDefault.value() !== false) {
+    if (preventDefaultVal !== false) {
       event.preventDefault();
     }
 
@@ -150,8 +149,29 @@ export class ActionState {
         name: null,
       };
       if (typeof actionName[INVOKE] === 'function') {
+        deprecate(
+          `Usage of the private INVOKE API to make an object callable via action or fn is no longer supported. Please update to pass in a callback function instead. Received: ${String(
+            actionName
+          )}`,
+          false,
+          {
+            until: '3.25.0',
+            id: 'actions.custom-invoke-invokable',
+            for: 'ember-source',
+            since: {
+              enabled: '3.23.0-beta.1',
+            },
+          }
+        );
+
         flaggedInstrument('interaction.ember-action', payload, () => {
           actionName[INVOKE].apply(actionName, args);
+        });
+        return;
+      }
+      if (isInvokableRef(actionName)) {
+        flaggedInstrument('interaction.ember-action', payload, () => {
+          updateRef(actionName, args[0]);
         });
         return;
       }
@@ -179,68 +199,24 @@ export class ActionState {
 
     return shouldBubble;
   }
-
-  destroy() {
-    ActionHelper.unregisterAction(this);
-  }
 }
 
-// implements ModifierManager<Action>
-export default class ActionModifierManager implements ModifierManager<ActionState, Opaque> {
+class ActionModifierManager implements InternalModifierManager<ActionState, object> {
   create(
-    element: Simple.Element,
-    _state: Opaque,
-    args: Arguments,
-    _dynamicScope: DynamicScope,
-    dom: any
-  ) {
-    let { named, positional, tag } = args.capture();
-    let implicitTarget;
-    let actionName;
-    let actionNameRef: any;
-    if (positional.length > 1) {
-      implicitTarget = positional.at(0);
-      actionNameRef = positional.at(1);
-
-      if (actionNameRef[INVOKE]) {
-        actionName = actionNameRef;
-      } else {
-        let actionLabel = actionNameRef.propertyKey;
-        actionName = actionNameRef.value();
-
-        assert(
-          'You specified a quoteless path, `' +
-            actionLabel +
-            '`, to the ' +
-            '{{action}} helper which did not resolve to an action name (a ' +
-            'string). Perhaps you meant to use a quoted actionName? (e.g. ' +
-            '{{action "' +
-            actionLabel +
-            '"}}).',
-          typeof actionName === 'string' || typeof actionName === 'function'
-        );
-      }
-    }
-
+    owner: Owner,
+    element: SimpleElement,
+    _state: object,
+    { named, positional }: CapturedArguments
+  ): ActionState {
     let actionArgs: any[] = [];
     // The first two arguments are (1) `this` and (2) the action name.
     // Everything else is a param.
     for (let i = 2; i < positional.length; i++) {
-      actionArgs.push(positional.at(i));
+      actionArgs.push(positional[i]);
     }
 
     let actionId = uuid();
-    let actionState = new ActionState(
-      element,
-      actionId,
-      actionName,
-      actionArgs,
-      named,
-      positional,
-      implicitTarget,
-      dom,
-      tag
-    );
+    let actionState = new ActionState(element, owner, actionId, actionArgs, named, positional);
 
     deprecate(
       `Using the \`{{action}}\` modifier with \`${actionState.eventName}\` events has been deprecated.`,
@@ -250,38 +226,96 @@ export default class ActionModifierManager implements ModifierManager<ActionStat
       {
         id: 'ember-views.event-dispatcher.mouseenter-leave-move',
         until: '4.0.0',
-        url: 'https://emberjs.com/deprecations/v3.x#toc_action-mouseenter-leave-move',
+        url: 'https://deprecations.emberjs.com/v3.x#toc_action-mouseenter-leave-move',
+        for: 'ember-source',
+        since: {
+          enabled: '3.13.0-beta.1',
+        },
       }
     );
 
     return actionState;
   }
 
-  install(actionState: ActionState) {
-    let { dom, element, actionId } = actionState;
-
-    ActionHelper.registerAction(actionState);
-
-    dom.setAttribute(element, 'data-ember-action', '');
-    dom.setAttribute(element, `data-ember-action-${actionId}`, actionId);
+  getDebugName(): string {
+    return 'action';
   }
 
-  update(actionState: ActionState) {
-    let { positional } = actionState;
-    let actionNameRef = positional.at(1);
+  install(actionState: ActionState): void {
+    let { element, actionId, positional } = actionState;
 
-    if (!actionNameRef[INVOKE]) {
-      actionState.actionName = actionNameRef.value();
+    let actionName;
+    let actionNameRef: any;
+    let implicitTarget;
+
+    if (positional.length > 1) {
+      implicitTarget = positional[0];
+      actionNameRef = positional[1];
+
+      if (isInvokableRef(actionNameRef)) {
+        actionName = actionNameRef;
+      } else {
+        actionName = valueForRef(actionNameRef);
+
+        if (DEBUG) {
+          let actionPath = actionNameRef.debugLabel;
+          let actionPathParts = actionPath.split('.');
+          let actionLabel = actionPathParts[actionPathParts.length - 1];
+
+          assert(
+            'You specified a quoteless path, `' +
+              actionPath +
+              '`, to the ' +
+              '{{action}} helper which did not resolve to an action name (a ' +
+              'string). Perhaps you meant to use a quoted actionName? (e.g. ' +
+              '{{action "' +
+              actionLabel +
+              '"}}).',
+            typeof actionName === 'string' || typeof actionName === 'function'
+          );
+        }
+      }
     }
 
-    actionState.eventName = actionState.getEventName();
+    actionState.actionName = actionName;
+    actionState.implicitTarget = implicitTarget;
+
+    this.ensureEventSetup(actionState);
+    ActionHelper.registerAction(actionState);
+
+    element.setAttribute('data-ember-action', '');
+    element.setAttribute(`data-ember-action-${actionId}`, String(actionId));
   }
 
-  getTag(actionState: ActionState) {
+  update(actionState: ActionState): void {
+    let { positional } = actionState;
+    let actionNameRef = positional[1];
+
+    if (!isInvokableRef(actionNameRef)) {
+      actionState.actionName = valueForRef(actionNameRef);
+    }
+
+    let newEventName = actionState.getEventName();
+    if (newEventName !== actionState.eventName) {
+      this.ensureEventSetup(actionState);
+      actionState.eventName = actionState.getEventName();
+    }
+  }
+
+  ensureEventSetup(actionState: ActionState): void {
+    let dispatcher = actionState.owner.lookup<EventDispatcher>('event_dispatcher:main');
+    dispatcher?.setupHandlerForEmberEvent(actionState.eventName);
+  }
+
+  getTag(actionState: ActionState): UpdatableTag {
     return actionState.tag;
   }
 
-  getDestructor(modifier: Destroyable) {
-    return modifier;
+  getDestroyable(actionState: ActionState): object {
+    return actionState;
   }
 }
+
+const ACTION_MODIFIER_MANAGER = new ActionModifierManager();
+
+export default setInternalModifierManager(ACTION_MODIFIER_MANAGER, {});

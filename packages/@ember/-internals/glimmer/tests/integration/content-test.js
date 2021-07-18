@@ -10,61 +10,149 @@ import { HAS_NATIVE_SYMBOL } from '@ember/-internals/utils';
 import { constructStyleDeprecationMessage } from '@ember/-internals/views';
 import { Component, SafeString, htmlSafe } from '../utils/helpers';
 
-moduleFor(
-  'Static content tests',
-  class extends RenderingTestCase {
-    ['@test it can render a static text node']() {
-      this.render('hello');
-      let text1 = this.assertTextNode(this.firstChild, 'hello');
+const EMPTY = Object.freeze({});
 
-      runTask(() => this.rerender());
+const LITERALS = [
+  ['foo', 'foo', '"foo"'],
+  [undefined, EMPTY],
+  [null, EMPTY],
+  [true, 'true'],
+  [false, 'false'],
+  [0, '0'],
+  [-0, '0', '-0'],
+  [1, '1'],
+  [-1, '-1'],
+  [0.0, '0', '0.0'],
+  [0.5, '0.5', '0.5'],
+  [0.5, '0.5', '0.500000000000000000000000000000'],
 
-      let text2 = this.assertTextNode(this.firstChild, 'hello');
+  // Kris Selden: that is a good one because it is above that 3 bit area,
+  // but the shifted < 0 check doesn't return true:
+  // https://github.com/glimmerjs/glimmer-vm/blob/761e78b2bef5de8b9b19ae5fb296380c21959ef8/packages/%40glimmer/opcode-compiler/lib/opcode-builder/encoder.ts#L277
+  [536870912, '536870912'],
 
-      this.assertSameNode(text1, text2);
-    }
+  // Kris Selden: various other 10000000 and 1111111 combos
+  [4294967296, '4294967296'],
+  [4294967295, '4294967295'],
+  [4294967294, '4294967294'],
+  [536870913, '536870913'],
+  [536870911, '536870911'],
+  [268435455, '268435455'],
+];
 
-    ['@test it can render a static element']() {
-      this.render('<p>hello</p>');
-      let p1 = this.assertElement(this.firstChild, { tagName: 'p' });
-      let text1 = this.assertTextNode(this.firstChild.firstChild, 'hello');
+let i = Number.MAX_SAFE_INTEGER;
 
-      runTask(() => this.rerender());
+while (i > 1) {
+  LITERALS.push([i, `${i}`, `${i}`]);
+  i = Math.round(i / 2);
+}
 
-      let p2 = this.assertElement(this.firstChild, { tagName: 'p' });
-      let text2 = this.assertTextNode(this.firstChild.firstChild, 'hello');
+i = Number.MIN_SAFE_INTEGER;
 
-      this.assertSameNode(p1, p2);
-      this.assertSameNode(text1, text2);
-    }
+while (i < -1) {
+  LITERALS.push([i, `${i}`, `${i}`]);
+  i = Math.round(i / 2);
+}
 
-    ['@test it can render a static template']() {
-      let template = `
-      <div class="header">
-        <h1>Welcome to Ember.js</h1>
-      </div>
-      <div class="body">
-        <h2>Why you should use Ember.js?</h2>
-        <ol>
-          <li>It's great</li>
-          <li>It's awesome</li>
-          <li>It's Ember.js</li>
-        </ol>
-      </div>
-      <div class="footer">
-        Ember.js is free, open source and always will be.
-      </div>
-    `;
+class StaticContentTest extends RenderingTestCase {
+  ['@test it can render a static text node']() {
+    this.render('hello');
+    let text1 = this.assertTextNode(this.firstChild, 'hello');
 
-      this.render(template);
-      this.assertHTML(template);
+    runTask(() => this.rerender());
 
-      runTask(() => this.rerender());
+    let text2 = this.assertTextNode(this.firstChild, 'hello');
 
-      this.assertHTML(template);
-    }
+    this.assertSameNode(text1, text2);
   }
-);
+
+  ['@test it can render a static element']() {
+    this.render('<p>hello</p>');
+    let p1 = this.assertElement(this.firstChild, { tagName: 'p' });
+    let text1 = this.assertTextNode(this.firstChild.firstChild, 'hello');
+
+    runTask(() => this.rerender());
+
+    let p2 = this.assertElement(this.firstChild, { tagName: 'p' });
+    let text2 = this.assertTextNode(this.firstChild.firstChild, 'hello');
+
+    this.assertSameNode(p1, p2);
+    this.assertSameNode(text1, text2);
+  }
+
+  ['@test it can render a static template']() {
+    let template = `
+    <div class="header">
+      <h1>Welcome to Ember.js</h1>
+    </div>
+    <div class="body">
+      <h2>Why you should use Ember.js?</h2>
+      <ol>
+        <li>It's great</li>
+        <li>It's awesome</li>
+        <li>It's Ember.js</li>
+      </ol>
+    </div>
+    <div class="footer">
+      Ember.js is free, open source and always will be.
+    </div>
+  `;
+
+    this.render(template);
+    this.assertHTML(template);
+
+    runTask(() => this.rerender());
+
+    this.assertHTML(template);
+  }
+}
+
+class StaticContentTestGenerator {
+  constructor(cases, tag = '@test') {
+    this.cases = cases;
+    this.tag = tag;
+  }
+
+  generate([value, expected, label]) {
+    let tag = this.tag;
+    label = label || value;
+
+    return {
+      [`${tag} rendering {{${label}}}`]() {
+        this.render(`{{${label}}}`);
+
+        if (expected === EMPTY) {
+          this.assertHTML('');
+        } else {
+          this.assertHTML(expected);
+        }
+
+        this.assertStableRerender();
+      },
+
+      [`${tag} rendering {{to-js ${label}}}`](assert) {
+        this.registerHelper('to-js', ([actual]) => {
+          assert.strictEqual(actual, value);
+          return actual;
+        });
+
+        this.render(`{{to-js ${label}}}`);
+
+        if (expected === EMPTY) {
+          this.assertHTML('');
+        } else {
+          this.assertHTML(expected);
+        }
+
+        this.assertStableRerender();
+      },
+    };
+  }
+}
+
+applyMixins(StaticContentTest, new StaticContentTestGenerator(LITERALS));
+
+moduleFor('Static content tests', StaticContentTest);
 
 class DynamicContentTest extends RenderingTestCase {
   /* abstract */
@@ -82,7 +170,7 @@ class DynamicContentTest extends RenderingTestCase {
   }
 
   ['@test it can render a dynamic path']() {
-    this.renderPath('message', { message: 'hello' });
+    this.renderPath('this.message', { message: 'hello' });
 
     this.assertContent('hello');
 
@@ -100,7 +188,7 @@ class DynamicContentTest extends RenderingTestCase {
   }
 
   ['@test resolves the string length properly']() {
-    this.render('<p>{{foo.length}}</p>', { foo: undefined });
+    this.render('<p>{{this.foo.length}}</p>', { foo: undefined });
 
     this.assertHTML('<p></p>');
 
@@ -120,7 +208,7 @@ class DynamicContentTest extends RenderingTestCase {
   }
 
   ['@test resolves the array length properly']() {
-    this.render('<p>{{foo.length}}</p>', { foo: undefined });
+    this.render('<p>{{this.foo.length}}</p>', { foo: undefined });
 
     this.assertHTML('<p></p>');
 
@@ -142,7 +230,7 @@ class DynamicContentTest extends RenderingTestCase {
   ['@test it can render a capitalized path with no deprecation']() {
     expectNoDeprecation();
 
-    this.renderPath('CaptializedPath', { CaptializedPath: 'no deprecation' });
+    this.renderPath('this.CaptializedPath', { CaptializedPath: 'no deprecation' });
 
     this.assertContent('no deprecation');
 
@@ -160,7 +248,7 @@ class DynamicContentTest extends RenderingTestCase {
   }
 
   ['@test it can render undefined dynamic paths']() {
-    this.renderPath('name', {});
+    this.renderPath('this.name', {});
 
     this.assertIsEmpty();
 
@@ -176,7 +264,7 @@ class DynamicContentTest extends RenderingTestCase {
   }
 
   ['@test it can render a deeply nested dynamic path']() {
-    this.renderPath('a.b.c.d.e.f', {
+    this.renderPath('this.a.b.c.d.e.f', {
       a: { b: { c: { d: { e: { f: 'hello' } } } } },
     });
 
@@ -204,14 +292,14 @@ class DynamicContentTest extends RenderingTestCase {
 
   ['@test it can render a computed property']() {
     let Formatter = EmberObject.extend({
-      formattedMessage: computed('message', function() {
+      formattedMessage: computed('message', function () {
         return this.get('message').toUpperCase();
       }),
     });
 
     let m = Formatter.create({ message: 'hello' });
 
-    this.renderPath('m.formattedMessage', { m });
+    this.renderPath('this.m.formattedMessage', { m });
 
     this.assertContent('HELLO');
 
@@ -230,14 +318,14 @@ class DynamicContentTest extends RenderingTestCase {
 
   ['@test it can render a computed property with nested dependency']() {
     let Formatter = EmberObject.extend({
-      formattedMessage: computed('messenger.message', function() {
+      formattedMessage: computed('messenger.message', function () {
         return this.get('messenger.message').toUpperCase();
       }),
     });
 
     let m = Formatter.create({ messenger: { message: 'hello' } });
 
-    this.renderPath('m.formattedMessage', { m });
+    this.renderPath('this.m.formattedMessage', { m });
 
     this.assertContent('HELLO');
 
@@ -255,7 +343,7 @@ class DynamicContentTest extends RenderingTestCase {
   }
 
   ['@test it can read from a proxy object']() {
-    this.renderPath('proxy.name', {
+    this.renderPath('this.proxy.name', {
       proxy: ObjectProxy.create({ content: { name: 'Tom Dale' } }),
     });
 
@@ -291,7 +379,7 @@ class DynamicContentTest extends RenderingTestCase {
   }
 
   ['@test it can read from a nested path in a proxy object']() {
-    this.renderPath('proxy.name.last', {
+    this.renderPath('this.proxy.name.last', {
       proxy: ObjectProxy.create({
         content: { name: { first: 'Tom', last: 'Dale' } },
       }),
@@ -348,7 +436,7 @@ class DynamicContentTest extends RenderingTestCase {
   }
 
   ['@test it can read from a path flipping between a proxy and a real object']() {
-    this.renderPath('proxyOrObject.name.last', {
+    this.renderPath('this.proxyOrObject.name.last', {
       proxyOrObject: ObjectProxy.create({
         content: { name: { first: 'Tom', last: 'Dale' } },
       }),
@@ -426,7 +514,7 @@ class DynamicContentTest extends RenderingTestCase {
   }
 
   ['@test it can read from a path flipping between a real object and a proxy']() {
-    this.renderPath('objectOrProxy.name.last', {
+    this.renderPath('this.objectOrProxy.name.last', {
       objectOrProxy: { name: { first: 'Tom', last: 'Dale' } },
     });
 
@@ -501,7 +589,7 @@ class DynamicContentTest extends RenderingTestCase {
     let nullObject = Object.create(null);
     nullObject['message'] = 'hello';
 
-    this.renderPath('nullObject.message', { nullObject });
+    this.renderPath('this.nullObject.message', { nullObject });
 
     this.assertContent('hello');
 
@@ -534,7 +622,7 @@ class DynamicContentTest extends RenderingTestCase {
       },
     });
 
-    this.renderPath('messenger.message', { messenger });
+    this.renderPath('this.messenger.message', { messenger });
 
     this.assertContent('hello');
 
@@ -568,7 +656,7 @@ class DynamicContentTest extends RenderingTestCase {
     let func = () => {};
     func.aProp = 'this is a property on a function';
 
-    this.renderPath('func.aProp', { func });
+    this.renderPath('this.func.aProp', { func });
 
     this.assertContent('this is a property on a function');
 
@@ -588,9 +676,7 @@ class DynamicContentTest extends RenderingTestCase {
   }
 }
 
-const EMPTY = {};
-
-class ContentTestGenerator {
+class DynamicContentTestGenerator {
   constructor(cases, tag = '@test') {
     this.cases = cases;
     this.tag = tag;
@@ -603,7 +689,7 @@ class ContentTestGenerator {
     if (expected === EMPTY) {
       return {
         [`${tag} rendering ${label}`]() {
-          this.renderPath('value', { value });
+          this.renderPath('this.value', { value });
 
           this.assertIsEmpty();
 
@@ -619,38 +705,39 @@ class ContentTestGenerator {
     } else {
       return {
         [`${tag} rendering ${label}`]() {
-          this.renderPath('value', { value });
+          this.renderPath('this.value', { value });
+
+          // NaN is unstable, not worth optimizing for in the VM
+          let wasNaN = typeof value === 'number' && isNaN(value);
 
           this.assertContent(expected);
 
-          this.assertStableRerender();
+          if (!wasNaN) {
+            this.assertStableRerender();
+          }
 
           runTask(() => set(this.context, 'value', 'hello'));
           this.assertContent('hello');
-          this.assertInvariants();
+
+          if (!wasNaN) {
+            this.assertInvariants();
+          }
 
           runTask(() => set(this.context, 'value', value));
 
           this.assertContent(expected);
-          this.assertInvariants();
+
+          if (!wasNaN) {
+            this.assertInvariants();
+          }
         },
       };
     }
   }
 }
 
-const SharedContentTestCases = new ContentTestGenerator([
-  ['foo', 'foo'],
-  [0, '0'],
-  [-0, '0', '-0'],
-  [1, '1'],
-  [-1, '-1'],
-  [0.0, '0', '0.0'],
-  [0.5, '0.5'],
-  [undefined, EMPTY],
-  [null, EMPTY],
-  [true, 'true'],
-  [false, 'false'],
+const SharedContentTestCases = new DynamicContentTestGenerator([
+  ...LITERALS,
   [NaN, 'NaN'],
   [new Date(2000, 0, 1), String(new Date(2000, 0, 1)), 'a Date object'],
   [Infinity, 'Infinity'],
@@ -679,7 +766,7 @@ const SharedContentTestCases = new ContentTestGenerator([
   ['<b>Max</b><b>James</b>', '<b>Max</b><b>James</b>'],
 ]);
 
-let GlimmerContentTestCases = new ContentTestGenerator([
+let GlimmerContentTestCases = new DynamicContentTestGenerator([
   [Object.create(null), EMPTY, 'an object with no toString'],
 ]);
 
@@ -703,7 +790,7 @@ moduleFor(
     }
 
     ['@test it can render empty safe strings [GH#16314]']() {
-      this.render('before {{value}} after', { value: htmlSafe('hello') });
+      this.render('before {{this.value}} after', { value: htmlSafe('hello') });
 
       this.assertHTML('before hello after');
 
@@ -807,7 +894,7 @@ moduleFor(
     }
 
     ['@test updating trusted curlies']() {
-      this.render('{{{htmlContent}}}{{{nested.htmlContent}}}', {
+      this.render('{{{this.htmlContent}}}{{{this.nested.htmlContent}}}', {
         htmlContent: '<b>Max</b>',
         nested: { htmlContent: '<b>James</b>' },
       });
@@ -835,7 +922,7 @@ moduleFor(
     }
 
     ['@test empty content in trusted curlies [GH#14978]']() {
-      this.render('before {{{value}}} after', {
+      this.render('before {{{this.value}}} after', {
         value: 'hello',
       });
 
@@ -886,18 +973,18 @@ moduleFor(
     ['@test it can render a dynamic template']() {
       let template = `
       <div class="header">
-        <h1>Welcome to {{framework}}</h1>
+        <h1>Welcome to {{this.framework}}</h1>
       </div>
       <div class="body">
-        <h2>Why you should use {{framework}}?</h2>
+        <h2>Why you should use {{this.framework}}?</h2>
         <ol>
           <li>It's great</li>
           <li>It's awesome</li>
-          <li>It's {{framework}}</li>
+          <li>It's {{this.framework}}</li>
         </ol>
       </div>
       <div class="footer">
-        {{framework}} is free, open source and always will be.
+        {{this.framework}} is free, open source and always will be.
       </div>
     `;
 
@@ -954,7 +1041,7 @@ moduleFor(
     }
 
     ['@test it should evaluate to nothing if part of the path is `undefined`']() {
-      this.render('{{foo.bar.baz.bizz}}', {
+      this.render('{{this.foo.bar.baz.bizz}}', {
         foo: {},
       });
 
@@ -990,7 +1077,7 @@ moduleFor(
     }
 
     ['@test it should evaluate to nothing if part of the path is a primative']() {
-      this.render('{{foo.bar.baz.bizz}}', {
+      this.render('{{this.foo.bar.baz.bizz}}', {
         foo: { bar: true },
       });
 
@@ -1096,7 +1183,7 @@ moduleFor(
     }
 
     ['@test quoteless class attributes update correctly']() {
-      this.render('<div class={{if fooBar "foo-bar"}}>hello</div>', {
+      this.render('<div class={{if this.fooBar "foo-bar"}}>hello</div>', {
         fooBar: true,
       });
 
@@ -1128,7 +1215,7 @@ moduleFor(
     }
 
     ['@test quoted class attributes update correctly'](assert) {
-      this.render('<div class="{{if fooBar "foo-bar"}}">hello</div>', {
+      this.render('<div class="{{if this.fooBar "foo-bar"}}">hello</div>', {
         fooBar: true,
       });
 
@@ -1535,7 +1622,7 @@ class StyleTest extends RenderingTestCase {
     super(...arguments);
     warnings = [];
     originalWarn = getDebugFunction('warn');
-    setDebugFunction('warn', function(message, test) {
+    setDebugFunction('warn', function (message, test) {
       if (!test) {
         warnings.push(message);
       }
@@ -1611,9 +1698,9 @@ if (DEBUG) {
   moduleFor(
     'Inline style tests - warnings',
     class extends StyleTest {
-      ['@test specifying <div style={{userValue}}></div> generates a warning']() {
+      ['@test specifying <div style={{this.userValue}}></div> generates a warning']() {
         let userValue = 'width: 42px';
-        this.render('<div style={{userValue}}></div>', {
+        this.render('<div style={{this.userValue}}></div>', {
           userValue,
         });
 
@@ -1630,23 +1717,23 @@ if (DEBUG) {
           template: 'hello',
         });
         let userValue = 'width: 42px';
-        this.render('{{foo-bar style=userValue}}', {
+        this.render('{{foo-bar style=this.userValue}}', {
           userValue,
         });
 
         this.assertStyleWarning(userValue);
       }
 
-      ['@test specifying `<div style={{{userValue}}}></div>` works properly without a warning']() {
-        this.render('<div style={{{userValue}}}></div>', {
+      ['@test specifying `<div style={{{this.userValue}}}></div>` works properly without a warning']() {
+        this.render('<div style={{{this.userValue}}}></div>', {
           userValue: 'width: 42px',
         });
 
         this.assertNoWarning();
       }
 
-      ['@test specifying `<div style={{userValue}}></div>` works properly with a SafeString']() {
-        this.render('<div style={{userValue}}></div>', {
+      ['@test specifying `<div style={{this.userValue}}></div>` works properly with a SafeString']() {
+        this.render('<div style={{this.userValue}}></div>', {
           userValue: new SafeString('width: 42px'),
         });
 
@@ -1654,7 +1741,7 @@ if (DEBUG) {
       }
 
       ['@test null value do not generate htmlsafe warning']() {
-        this.render('<div style={{userValue}}></div>', {
+        this.render('<div style={{this.userValue}}></div>', {
           userValue: null,
         });
 
@@ -1662,13 +1749,13 @@ if (DEBUG) {
       }
 
       ['@test undefined value do not generate htmlsafe warning']() {
-        this.render('<div style={{userValue}}></div>');
+        this.render('<div style={{this.userValue}}></div>');
 
         this.assertNoWarning();
       }
 
       ['@test no warnings are triggered when a safe string is quoted']() {
-        this.render('<div style="{{userValue}}"></div>', {
+        this.render('<div style="{{this.userValue}}"></div>', {
           userValue: new SafeString('width: 42px'),
         });
 
@@ -1677,7 +1764,7 @@ if (DEBUG) {
 
       ['@test binding warning is triggered when an unsafe string is quoted']() {
         let userValue = 'width: 42px';
-        this.render('<div style="{{userValue}}"></div>', {
+        this.render('<div style="{{this.userValue}}"></div>', {
           userValue,
         });
 
@@ -1686,7 +1773,7 @@ if (DEBUG) {
 
       ['@test binding warning is triggered when a safe string for a complete property is concatenated in place']() {
         let userValue = 'width: 42px';
-        this.render('<div style="color: green; {{userValue}}"></div>', {
+        this.render('<div style="color: green; {{this.userValue}}"></div>', {
           userValue: new SafeString('width: 42px'),
         });
 
@@ -1695,7 +1782,7 @@ if (DEBUG) {
 
       ['@test binding warning is triggered when a safe string for a value is concatenated in place']() {
         let userValue = '42px';
-        this.render('<div style="color: green; width: {{userValue}}"></div>', {
+        this.render('<div style="color: green; width: {{this.userValue}}"></div>', {
           userValue: new SafeString(userValue),
         });
 
@@ -1704,7 +1791,7 @@ if (DEBUG) {
 
       ['@test binding warning is triggered when a safe string for a property name is concatenated in place']() {
         let userValue = 'width';
-        this.render('<div style="color: green; {{userProperty}}: 42px"></div>', {
+        this.render('<div style="color: green; {{this.userProperty}}: 42px"></div>', {
           userProperty: new SafeString(userValue),
         });
 

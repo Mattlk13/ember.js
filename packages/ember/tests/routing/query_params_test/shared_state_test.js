@@ -12,7 +12,7 @@ moduleFor(
     }
 
     setupApplication() {
-      this.router.map(function() {
+      this.router.map(function () {
         this.route('home', { path: '/' });
         this.route('dashboard');
       });
@@ -39,12 +39,15 @@ moduleFor(
         })
       );
 
-      this.addTemplate('application', `{{link-to 'Home' 'home' }} <div> {{outlet}} </div>`);
+      this.addTemplate(
+        'application',
+        `<LinkTo @route="home">Home</LinkTo> <div> {{outlet}} </div>`
+      );
       this.addTemplate(
         'home',
-        `{{link-to 'Dashboard' 'dashboard' }}{{input type="checkbox" id='filters-checkbox' checked=(mut filters.shared) }}`
+        `<LinkTo @route='dashboard'>Dashboard</LinkTo><Input @type="checkbox" id='filters-checkbox' checked={{mut this.filters.shared}} />`
       );
-      this.addTemplate('dashboard', `{{link-to 'Home' 'home' }}`);
+      this.addTemplate('dashboard', `<LinkTo @route="home">Home</LinkTo>`);
     }
     visitApplication() {
       return this.visit('/');

@@ -1,11 +1,12 @@
-import { assert } from '@ember/debug';
+import { DEBUG } from '@glimmer/env';
+import { assert, deprecate } from '@ember/debug';
 import { onErrorTarget } from '@ember/-internals/error-handling';
 import { flushAsyncObservers } from '@ember/-internals/metal';
+import { onRunloopDotAccess } from '@ember/-internals/overrides';
 import Backburner from 'backburner';
-import { EMBER_METAL_TRACKED_PROPERTIES } from '@ember/canary-features';
 
 let currentRunLoop = null;
-export function getCurrentRunLoop() {
+export function _getCurrentRunLoop() {
   return currentRunLoop;
 }
 
@@ -16,21 +17,15 @@ function onBegin(current) {
 function onEnd(current, next) {
   currentRunLoop = next;
 
-  if (EMBER_METAL_TRACKED_PROPERTIES) {
-    flushAsyncObservers();
-  }
+  flushAsyncObservers();
 }
 
-let flush;
+function flush(queueName, next) {
+  if (queueName === 'render' || queueName === _rsvpErrorQueue) {
+    flushAsyncObservers();
+  }
 
-if (EMBER_METAL_TRACKED_PROPERTIES) {
-  flush = function(queueName, next) {
-    if (queueName === 'render' || queueName === _rsvpErrorQueue) {
-      flushAsyncObservers();
-    }
-
-    next();
-  };
+  next();
 }
 
 export const _rsvpErrorQueue = `${Math.random()}${Date.now()}`.replace('.', '');
@@ -46,7 +41,7 @@ export const _rsvpErrorQueue = `${Math.random()}${Date.now()}`.replace('.', '');
   @default ['actions', 'destroy']
   @private
 */
-export const queues = [
+export const _queues = [
   'actions',
 
   // used in router transitions to prevent unnecessary loading state entry
@@ -62,7 +57,7 @@ export const queues = [
   _rsvpErrorQueue,
 ];
 
-export const backburner = new Backburner(queues, {
+export const _backburner = new Backburner(_queues, {
   defaultQueue: 'actions',
   onBegin,
   onEnd,
@@ -107,11 +102,8 @@ export const backburner = new Backburner(queues, {
   @public
 */
 export function run() {
-  return backburner.run(...arguments);
+  return _backburner.run(...arguments);
 }
-
-// used for the Ember.run global only
-export const _globalsRun = run.bind(null);
 
 /**
   If no run-loop is present, it creates a new one. If a run loop is
@@ -158,7 +150,7 @@ export const _globalsRun = run.bind(null);
   @public
 */
 export function join() {
-  return backburner.join(...arguments);
+  return _backburner.join(...arguments);
 }
 
 /**
@@ -226,7 +218,7 @@ export function join() {
 export const bind = (...curried) => {
   assert(
     'could not find a suitable method to bind',
-    (function(methodOrTarget, methodOrArg) {
+    (function (methodOrTarget, methodOrArg) {
       // Applies the same logic as backburner parseArgs for detecting if a method
       // is actually being passed.
       let length = arguments.length;
@@ -268,7 +260,7 @@ export const bind = (...curried) => {
   @public
 */
 export function begin() {
-  backburner.begin();
+  _backburner.begin();
 }
 
 /**
@@ -291,7 +283,7 @@ export function begin() {
   @public
 */
 export function end() {
-  backburner.end();
+  _backburner.end();
 }
 
 /**
@@ -336,17 +328,17 @@ export function end() {
   @public
 */
 export function schedule(/* queue, target, method */) {
-  return backburner.schedule(...arguments);
+  return _backburner.schedule(...arguments);
 }
 
 // Used by global test teardown
-export function hasScheduledTimers() {
-  return backburner.hasTimers();
+export function _hasScheduledTimers() {
+  return _backburner.hasTimers();
 }
 
 // Used by global test teardown
-export function cancelTimers() {
-  backburner.cancelTimers();
+export function _cancelTimers() {
+  _backburner.cancelTimers();
 }
 
 /**
@@ -380,7 +372,7 @@ export function cancelTimers() {
   @public
 */
 export function later(/*target, method*/) {
-  return backburner.later(...arguments);
+  return _backburner.later(...arguments);
 }
 
 /**
@@ -400,7 +392,7 @@ export function later(/*target, method*/) {
 */
 export function once(...args) {
   args.unshift('actions');
-  return backburner.scheduleOnce(...args);
+  return _backburner.scheduleOnce(...args);
 }
 
 /**
@@ -476,7 +468,7 @@ export function once(...args) {
   @public
 */
 export function scheduleOnce(/* queue, target, method*/) {
-  return backburner.scheduleOnce(...arguments);
+  return _backburner.scheduleOnce(...arguments);
 }
 
 /**
@@ -551,7 +543,7 @@ export function scheduleOnce(/* queue, target, method*/) {
 */
 export function next(...args) {
   args.push(1);
-  return backburner.later(...args);
+  return _backburner.later(...args);
 }
 
 /**
@@ -622,7 +614,7 @@ export function next(...args) {
   @public
 */
 export function cancel(timer) {
-  return backburner.cancel(timer);
+  return _backburner.cancel(timer);
 }
 
 /**
@@ -700,7 +692,7 @@ export function cancel(timer) {
   @public
 */
 export function debounce() {
-  return backburner.debounce(...arguments);
+  return _backburner.debounce(...arguments);
 }
 
 /**
@@ -747,5 +739,90 @@ export function debounce() {
   @public
 */
 export function throttle() {
-  return backburner.throttle(...arguments);
+  return _backburner.throttle(...arguments);
+}
+
+export let _deprecatedGlobalGetCurrentRunLoop;
+
+// eslint-disable-next-line no-undef
+if (DEBUG) {
+  let defaultHandler = (dotKey, importKey, module) => {
+    return `Using \`${dotKey}\` has been deprecated. Instead, import the value directly from ${module}:\n\n  import { ${importKey} } from '${module}';`;
+  };
+
+  let handler = onRunloopDotAccess || defaultHandler;
+
+  let defineDeprecatedRunloopFunc = (key, func) => {
+    Object.defineProperty(run, key, {
+      get() {
+        let message = handler(`run.${key}`, key, '@ember/runloop');
+
+        deprecate(message, message === null, {
+          id: 'deprecated-run-loop-and-computed-dot-access',
+          until: '4.0.0',
+          for: 'ember-source',
+          since: {
+            enabled: '3.27.0',
+          },
+        });
+
+        return func;
+      },
+    });
+  };
+
+  _deprecatedGlobalGetCurrentRunLoop = () => {
+    let message = handler('run.currentRunLoop', 'getCurrentRunLoop', '@ember/runloop');
+
+    deprecate(message, message === null, {
+      id: 'deprecated-run-loop-and-computed-dot-access',
+      until: '4.0.0',
+      for: 'ember-source',
+      since: {
+        enabled: '3.27.0',
+      },
+    });
+
+    return _getCurrentRunLoop();
+  };
+
+  defineDeprecatedRunloopFunc('backburner', _backburner);
+  defineDeprecatedRunloopFunc('begin', begin);
+  defineDeprecatedRunloopFunc('bind', bind);
+  defineDeprecatedRunloopFunc('cancel', cancel);
+  defineDeprecatedRunloopFunc('debounce', debounce);
+  defineDeprecatedRunloopFunc('end', end);
+  defineDeprecatedRunloopFunc('hasScheduledTimers', _hasScheduledTimers);
+  defineDeprecatedRunloopFunc('join', join);
+  defineDeprecatedRunloopFunc('later', later);
+  defineDeprecatedRunloopFunc('next', next);
+  defineDeprecatedRunloopFunc('once', once);
+  defineDeprecatedRunloopFunc('schedule', schedule);
+  defineDeprecatedRunloopFunc('scheduleOnce', scheduleOnce);
+  defineDeprecatedRunloopFunc('throttle', throttle);
+  defineDeprecatedRunloopFunc('cancelTimers', _cancelTimers);
+  Object.defineProperty(run, 'currentRunLoop', {
+    get: _deprecatedGlobalGetCurrentRunLoop,
+    enumerable: false,
+  });
+} else {
+  run.backburner = _backburner;
+  run.begin = begin;
+  run.bind = bind;
+  run.cancel = cancel;
+  run.debounce = debounce;
+  run.end = end;
+  run.hasScheduledTimers = _hasScheduledTimers;
+  run.join = join;
+  run.later = later;
+  run.next = next;
+  run.once = once;
+  run.schedule = schedule;
+  run.scheduleOnce = scheduleOnce;
+  run.throttle = throttle;
+  run.cancelTimers = _cancelTimers;
+  Object.defineProperty(run, 'currentRunLoop', {
+    get: _getCurrentRunLoop,
+    enumerable: false,
+  });
 }

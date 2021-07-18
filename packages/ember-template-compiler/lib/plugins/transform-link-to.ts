@@ -1,26 +1,23 @@
-import { assert } from '@ember/debug';
-import { AST, ASTPlugin, ASTPluginEnvironment } from '@glimmer/syntax';
+import { assert, deprecate } from '@ember/debug';
+import { AST, ASTPlugin } from '@glimmer/syntax';
 import calculateLocationDisplay from '../system/calculate-location-display';
-import { Builders } from '../types';
+import { Builders, EmberASTPluginEnvironment } from '../types';
+import { isPath, isSubExpression } from './utils';
 
 function isInlineLinkTo(node: AST.MustacheStatement): boolean {
-  return node.path.original === 'link-to';
+  return isPath(node.path) && node.path.original === 'link-to';
 }
 
 function isBlockLinkTo(node: AST.BlockStatement): boolean {
-  return node.path.original === 'link-to';
-}
-
-function isSubExpression(node: AST.Expression): node is AST.SubExpression {
-  return node.type === 'SubExpression';
+  return isPath(node.path) && node.path.original === 'link-to';
 }
 
 function isQueryParams(node: AST.Expression): node is AST.SubExpression {
-  return isSubExpression(node) && node.path.original === 'query-params';
+  return isSubExpression(node) && isPath(node.path) && node.path.original === 'query-params';
 }
 
 function transformInlineLinkToIntoBlockForm(
-  env: ASTPluginEnvironment,
+  env: EmberASTPluginEnvironment,
   node: AST.MustacheStatement
 ): AST.BlockStatement {
   let { builders: b } = env.syntax;
@@ -29,24 +26,30 @@ function transformInlineLinkToIntoBlockForm(
     'link-to',
     node.params.slice(1),
     node.hash,
-    buildProgram(b, node.params[0], node.escaped, node.loc),
+    b.blockItself(
+      [buildStatement(b, node.params[0], node.escaped, node.loc)],
+      undefined,
+      false,
+      node.loc
+    ),
     null,
     node.loc
   );
 }
 
 function transformPositionalLinkToIntoNamedArguments(
-  env: ASTPluginEnvironment,
-  node: AST.BlockStatement
+  env: EmberASTPluginEnvironment,
+  node: AST.BlockStatement,
+  hasBlock = true
 ): AST.BlockStatement {
   let { builders: b } = env.syntax;
-  let { moduleName } = env.meta;
+  let moduleName = env.meta?.moduleName;
   let {
     params,
     hash: { pairs },
   } = node;
 
-  let keys = pairs.map(pair => pair.key);
+  let keys = pairs.map((pair) => pair.key);
 
   if (params.length === 0) {
     assert(
@@ -112,6 +115,9 @@ function transformPositionalLinkToIntoNamedArguments(
     params.length > 0
   );
 
+  let equivalentNamedArgs = [];
+  let hasQueryParams = false;
+
   // 1. The last argument is possibly the `query` object.
 
   let query = params[params.length - 1];
@@ -128,8 +134,14 @@ function transformPositionalLinkToIntoNamedArguments(
     );
 
     pairs.push(
-      b.pair('query', b.sexpr(b.path('hash', query.path.loc), [], query.hash, query.loc), query.loc)
+      b.pair(
+        'query',
+        b.sexpr(b.path('-hash', query.path.loc), [], query.hash, query.loc),
+        query.loc
+      )
     );
+
+    hasQueryParams = true;
   }
 
   // 2. If there is a `route`, it is now at index 0.
@@ -138,16 +150,53 @@ function transformPositionalLinkToIntoNamedArguments(
 
   if (route) {
     pairs.push(b.pair('route', route, route.loc));
+    equivalentNamedArgs.push('`@route`');
   }
 
   // 3. Any remaining indices (if any) are `models`.
 
   if (params.length === 1) {
     pairs.push(b.pair('model', params[0], params[0].loc));
+    equivalentNamedArgs.push('`@model`');
   } else if (params.length > 1) {
     pairs.push(
       b.pair('models', b.sexpr(b.path('array', node.loc), params, undefined, node.loc), node.loc)
     );
+    equivalentNamedArgs.push('`@models`');
+  }
+
+  if (hasQueryParams) {
+    equivalentNamedArgs.push('`@query`');
+  }
+
+  if (equivalentNamedArgs.length > 0) {
+    let message = 'Invoking the `<LinkTo>` component with positional arguments is deprecated.';
+
+    message += `Please use the equivalent named arguments (${equivalentNamedArgs.join(', ')})`;
+
+    if (hasQueryParams) {
+      message += ' along with the `hash` helper';
+    }
+
+    if (!hasBlock) {
+      message += " and pass a block for the link's content.";
+    }
+
+    message += '.';
+
+    if (node.loc?.source) {
+      message += ` ${calculateLocationDisplay(moduleName, node.loc)}`;
+    }
+
+    deprecate(message, false, {
+      id: 'ember-glimmer.link-to.positional-arguments',
+      until: '4.0.0',
+      for: 'ember-source',
+      url: 'https://deprecations.emberjs.com/v3.x#toc_ember-glimmer-link-to-positional-arguments',
+      since: {
+        enabled: '3.26.0-beta.1',
+      },
+    });
   }
 
   return b.block(
@@ -158,10 +207,6 @@ function transformPositionalLinkToIntoNamedArguments(
     node.inverse,
     node.loc
   );
-}
-
-function buildProgram(b: Builders, content: AST.Node, escaped: boolean, loc: AST.SourceLocation) {
-  return b.program([buildStatement(b, content, escaped, loc)], undefined, loc);
 }
 
 function buildStatement(b: Builders, content: AST.Node, escaped: boolean, loc: AST.SourceLocation) {
@@ -178,7 +223,7 @@ function buildStatement(b: Builders, content: AST.Node, escaped: boolean, loc: A
   }
 }
 
-export default function transformLinkTo(env: ASTPluginEnvironment): ASTPlugin {
+export default function transformLinkTo(env: EmberASTPluginEnvironment): ASTPlugin {
   return {
     name: 'transform-link-to',
 
@@ -186,7 +231,7 @@ export default function transformLinkTo(env: ASTPluginEnvironment): ASTPlugin {
       MustacheStatement(node: AST.MustacheStatement): AST.Node | void {
         if (isInlineLinkTo(node)) {
           let block = transformInlineLinkToIntoBlockForm(env, node);
-          return transformPositionalLinkToIntoNamedArguments(env, block);
+          return transformPositionalLinkToIntoNamedArguments(env, block, false);
         }
       },
 
