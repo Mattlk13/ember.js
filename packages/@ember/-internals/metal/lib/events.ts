@@ -1,8 +1,10 @@
 /**
 @module @ember/object
 */
-import { Meta, meta as metaFor, peekMeta } from '@ember/-internals/meta';
+import type { Meta } from '@ember/-internals/meta';
+import { meta as metaFor, peekMeta } from '@ember/-internals/meta';
 import { setListeners } from '@ember/-internals/utils';
+import type { AnyFn } from '@ember/-internals/utility-types';
 import { assert } from '@ember/debug';
 
 /*
@@ -40,7 +42,7 @@ export function addListener(
   obj: object,
   eventName: string,
   target: object | Function | null,
-  method?: Function | string,
+  method?: Function | PropertyKey,
   once?: boolean,
   sync = true
 ): void {
@@ -118,14 +120,13 @@ export function removeListener(
 export function sendEvent(
   obj: object,
   eventName: string,
-  params: any[],
+  params?: any[],
   actions?: any[],
   _meta?: Meta | null
 ) {
   if (actions === undefined) {
     let meta = _meta === undefined ? peekMeta(obj) : _meta;
-    actions =
-      typeof meta === 'object' && meta !== null ? meta.matchingListeners(eventName) : undefined;
+    actions = meta !== null ? meta.matchingListeners(eventName) : undefined;
   }
 
   if (actions === undefined || actions.length === 0) {
@@ -134,7 +135,7 @@ export function sendEvent(
 
   for (let i = actions.length - 3; i >= 0; i -= 3) {
     // looping in reverse for once listeners
-    let target = actions[i] as any | null;
+    let target = actions[i];
     let method = actions[i + 1] as string | Function;
     let once = actions[i + 2] as boolean;
 
@@ -147,17 +148,19 @@ export function sendEvent(
     if (!target) {
       target = obj;
     }
-    if ('string' === typeof method) {
-      method = target[method] as Function;
+
+    let type = typeof method;
+    if (type === 'string' || type === 'symbol') {
+      method = target[method as string] as Function;
     }
 
-    method.apply(target, params);
+    (method as Function).apply(target, params);
   }
   return true;
 }
 
 /**
-  @private
+  @public
   @method hasListeners
   @static
   @for @ember/object/events
@@ -202,14 +205,14 @@ export function hasListeners(obj: object, eventName: string): boolean {
   @return {Function} the listener function, passed as last argument to on(...)
   @public
 */
-export function on(...args: Array<string | Function>): Function {
-  let func = args.pop() as Function;
+export function on<T extends AnyFn>(...args: [...eventNames: string[], func: T]): T {
+  let func = args.pop();
   let events = args as string[];
 
   assert('on expects function as last argument', typeof func === 'function');
   assert(
     'on called without valid event names',
-    events.length > 0 && events.every(p => typeof p === 'string' && p.length > 0)
+    events.length > 0 && events.every((p) => typeof p === 'string' && p.length > 0)
   );
 
   setListeners(func, events);

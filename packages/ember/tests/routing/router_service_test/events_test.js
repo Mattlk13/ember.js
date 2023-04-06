@@ -1,6 +1,6 @@
 import { RouterTestCase, moduleFor } from 'internal-test-helpers';
-import { inject as service } from '@ember/service';
-import { Route } from '@ember/-internals/routing';
+import { service } from '@ember/service';
+import Route from '@ember/routing/route';
 import { later } from '@ember/runloop';
 
 moduleFor(
@@ -14,14 +14,14 @@ moduleFor(
           router: service('router'),
           init() {
             this._super(...arguments);
-            this.router.on('routeWillChange', transition => {
+            this.router.on('routeWillChange', (transition) => {
               assert.ok(transition);
               assert.equal(transition.from, undefined);
               assert.equal(transition.to.name, 'parent.index');
               assert.equal(transition.to.localName, 'index');
             });
 
-            this.router.on('routeDidChange', transition => {
+            this.router.on('routeDidChange', (transition) => {
               assert.ok(transition);
               assert.ok(this.router.currentURL, `has URL ${this.router.currentURL}`);
               assert.equal(this.router.currentURL, '/');
@@ -50,7 +50,7 @@ moduleFor(
           router: service('router'),
           init() {
             this._super(...arguments);
-            this.router.on('routeWillChange', transition => {
+            this.router.on('routeWillChange', (transition) => {
               if (toParent) {
                 assert.equal(this.router.currentURL, null, 'starts as null');
                 assert.equal(transition.from, undefined);
@@ -74,7 +74,7 @@ moduleFor(
               }
             });
 
-            this.router.on('routeDidChange', transition => {
+            this.router.on('routeDidChange', (transition) => {
               if (toParent) {
                 assert.equal(this.router.currentURL, '/child');
                 assert.equal(transition.from, undefined);
@@ -120,7 +120,7 @@ moduleFor(
         .then(() => {
           return this.visit('/');
         })
-        .catch(e => {
+        .catch((e) => {
           assert.equal(e.message, 'TransitionAborted');
         });
     }
@@ -133,8 +133,9 @@ moduleFor(
       this.add(
         `route:parent`,
         Route.extend({
+          router: service(),
           model() {
-            this.transitionTo('parent.child');
+            this.router.transitionTo('parent.child');
           },
         })
       );
@@ -142,8 +143,9 @@ moduleFor(
       this.add(
         `route:parent.child`,
         Route.extend({
+          router: service(),
           model() {
-            this.transitionTo('parent.sister');
+            this.router.transitionTo('parent.sister');
           },
         })
       );
@@ -155,7 +157,7 @@ moduleFor(
           init() {
             this._super(...arguments);
 
-            this.router.on('routeWillChange', transition => {
+            this.router.on('routeWillChange', (transition) => {
               assert.equal(transition.from, undefined, 'initial');
               if (toChild) {
                 if (toSister) {
@@ -171,7 +173,7 @@ moduleFor(
               }
             });
 
-            this.router.on('routeDidChange', transition => {
+            this.router.on('routeDidChange', (transition) => {
               assert.equal(transition.from, undefined, 'initial');
               assert.equal(transition.to.name, 'parent.sister', 'landed on /sister');
             });
@@ -189,8 +191,9 @@ moduleFor(
       this.add(
         `route:parent`,
         Route.extend({
+          router: service(),
           model() {
-            this.replaceWith('parent.child');
+            this.router.replaceWith('parent.child');
           },
         })
       );
@@ -198,8 +201,9 @@ moduleFor(
       this.add(
         `route:parent.child`,
         Route.extend({
+          router: service(),
           model() {
-            this.replaceWith('parent.sister');
+            this.router.replaceWith('parent.sister');
           },
         })
       );
@@ -211,7 +215,7 @@ moduleFor(
           init() {
             this._super(...arguments);
 
-            this.router.on('routeWillChange', transition => {
+            this.router.on('routeWillChange', (transition) => {
               assert.equal(transition.from, undefined, 'initial');
               if (toChild) {
                 if (toSister) {
@@ -227,7 +231,7 @@ moduleFor(
               }
             });
 
-            this.router.on('routeDidChange', transition => {
+            this.router.on('routeDidChange', (transition) => {
               assert.equal(transition.from, undefined, 'initial');
               assert.equal(transition.to.name, 'parent.sister', 'landed on /sister');
             });
@@ -245,8 +249,9 @@ moduleFor(
       this.add(
         `route:parent.child`,
         Route.extend({
+          router: service(),
           model() {
-            this.transitionTo('parent.sister');
+            this.router.transitionTo('parent.sister');
           },
         })
       );
@@ -258,7 +263,7 @@ moduleFor(
           init() {
             this._super(...arguments);
 
-            this.router.on('routeWillChange', transition => {
+            this.router.on('routeWillChange', (transition) => {
               if (toChild) {
                 assert.equal(transition.from.name, 'parent.index');
                 if (toSister) {
@@ -274,7 +279,7 @@ moduleFor(
               }
             });
 
-            this.router.on('routeDidChange', transition => {
+            this.router.on('routeDidChange', (transition) => {
               if (toSister) {
                 assert.equal(transition.from.name, 'parent.index', 'initial');
                 assert.equal(transition.to.name, 'parent.sister', 'landed on /sister');
@@ -288,7 +293,7 @@ moduleFor(
       );
       return this.visit('/').then(() => {
         toChild = true;
-        return this.routerService.transitionTo('/child').catch(e => {
+        return this.routerService.transitionTo('/child').catch((e) => {
           assert.equal(e.name, 'TransitionAborted', 'Transition aborted');
         });
       });
@@ -302,8 +307,9 @@ moduleFor(
       this.add(
         `route:parent.child`,
         Route.extend({
+          router: service(),
           model() {
-            this.replaceWith('parent.sister');
+            this.router.replaceWith('parent.sister');
           },
         })
       );
@@ -315,7 +321,7 @@ moduleFor(
           init() {
             this._super(...arguments);
 
-            this.router.on('routeWillChange', transition => {
+            this.router.on('routeWillChange', (transition) => {
               if (toChild) {
                 assert.equal(transition.from.name, 'parent.index');
                 if (toSister) {
@@ -331,7 +337,7 @@ moduleFor(
               }
             });
 
-            this.router.on('routeDidChange', transition => {
+            this.router.on('routeDidChange', (transition) => {
               if (toSister) {
                 assert.equal(transition.from.name, 'parent.index', 'initial');
                 assert.equal(transition.to.name, 'parent.sister', 'landed on /sister');
@@ -345,7 +351,7 @@ moduleFor(
       );
       return this.visit('/').then(() => {
         toChild = true;
-        return this.routerService.transitionTo('/child').catch(e => {
+        return this.routerService.transitionTo('/child').catch((e) => {
           assert.equal(e.name, 'TransitionAborted', 'Transition aborted');
         });
       });
@@ -373,7 +379,7 @@ moduleFor(
           init() {
             this._super(...arguments);
 
-            this.router.on('routeWillChange', transition => {
+            this.router.on('routeWillChange', (transition) => {
               if (didAbort) {
                 assert.equal(transition.to.name, 'parent.index', 'transition aborted');
                 assert.equal(transition.from.name, 'parent.index', 'transition aborted');
@@ -386,7 +392,7 @@ moduleFor(
               }
             });
 
-            this.router.on('routeDidChange', transition => {
+            this.router.on('routeDidChange', (transition) => {
               if (didAbort) {
                 assert.equal(transition.to.name, 'parent.index', 'landed on /');
                 assert.equal(transition.from.name, 'parent.index', 'initial');
@@ -400,7 +406,7 @@ moduleFor(
       );
       return this.visit('/').then(() => {
         toChild = true;
-        return this.routerService.transitionTo('/child').catch(e => {
+        return this.routerService.transitionTo('/child').catch((e) => {
           assert.equal(e.name, 'TransitionAborted', 'Transition aborted');
         });
       });
@@ -419,7 +425,7 @@ moduleFor(
           init() {
             this._super(...arguments);
 
-            this.router.on('routeWillChange', transition => {
+            this.router.on('routeWillChange', (transition) => {
               assert.equal(transition.to.name, 'parent.index');
               if (initial) {
                 assert.equal(transition.from, null);
@@ -435,7 +441,7 @@ moduleFor(
               }
             });
 
-            this.router.on('routeDidChange', transition => {
+            this.router.on('routeDidChange', (transition) => {
               if (initial) {
                 assert.equal(transition.from, null);
                 assert.deepEqual(transition.to.queryParams, { a: 'true' });
@@ -473,9 +479,10 @@ moduleFor(
       this.add(
         `route:parent.child`,
         Route.extend({
+          router: service(),
           model() {
             toSister = true;
-            this.transitionTo('/sister?a=a');
+            this.router.transitionTo('/sister?a=a');
           },
         })
       );
@@ -487,7 +494,7 @@ moduleFor(
           init() {
             this._super(...arguments);
 
-            this.router.on('routeWillChange', transition => {
+            this.router.on('routeWillChange', (transition) => {
               if (toSister) {
                 assert.equal(transition.to.name, 'parent.sister');
                 assert.deepEqual(transition.to.queryParams, { a: 'a' });
@@ -497,7 +504,7 @@ moduleFor(
               }
             });
 
-            this.router.on('routeDidChange', transition => {
+            this.router.on('routeDidChange', (transition) => {
               assert.equal(transition.to.name, 'parent.sister');
               assert.deepEqual(transition.to.queryParams, { a: 'a' });
             });
@@ -514,9 +521,10 @@ moduleFor(
       this.add(
         `route:parent.child`,
         Route.extend({
+          router: service(),
           model() {
             toSister = true;
-            this.replaceWith('/sister?a=a');
+            this.router.replaceWith('/sister?a=a');
           },
         })
       );
@@ -528,7 +536,7 @@ moduleFor(
           init() {
             this._super(...arguments);
 
-            this.router.on('routeWillChange', transition => {
+            this.router.on('routeWillChange', (transition) => {
               if (toSister) {
                 assert.equal(transition.to.name, 'parent.sister');
                 assert.deepEqual(transition.to.queryParams, { a: 'a' });
@@ -538,7 +546,7 @@ moduleFor(
               }
             });
 
-            this.router.on('routeDidChange', transition => {
+            this.router.on('routeDidChange', (transition) => {
               assert.equal(transition.to.name, 'parent.sister');
               assert.deepEqual(transition.to.queryParams, { a: 'a' });
             });
@@ -552,13 +560,13 @@ moduleFor(
     '@test params'(assert) {
       assert.expect(14);
 
-      let inital = true;
+      let initial = true;
 
       this.add(
         'route:dynamic',
         Route.extend({
           model(params) {
-            if (inital) {
+            if (initial) {
               assert.deepEqual(params, { dynamic_id: '123' });
             } else {
               assert.deepEqual(params, { dynamic_id: '1' });
@@ -575,9 +583,9 @@ moduleFor(
           init() {
             this._super(...arguments);
 
-            this.router.on('routeWillChange', transition => {
+            this.router.on('routeWillChange', (transition) => {
               assert.equal(transition.to.name, 'dynamic');
-              if (inital) {
+              if (initial) {
                 assert.deepEqual(transition.to.paramNames, ['dynamic_id']);
                 assert.deepEqual(transition.to.params, { dynamic_id: '123' });
               } else {
@@ -586,10 +594,10 @@ moduleFor(
               }
             });
 
-            this.router.on('routeDidChange', transition => {
+            this.router.on('routeDidChange', (transition) => {
               assert.equal(transition.to.name, 'dynamic');
               assert.deepEqual(transition.to.paramNames, ['dynamic_id']);
-              if (inital) {
+              if (initial) {
                 assert.deepEqual(transition.to.params, { dynamic_id: '123' });
               } else {
                 assert.deepEqual(transition.to.params, { dynamic_id: '1' });
@@ -600,7 +608,7 @@ moduleFor(
       );
 
       return this.visit('/dynamic/123').then(() => {
-        inital = false;
+        initial = false;
         return this.routerService.transitionTo('dynamic', 1);
       });
     }
@@ -640,7 +648,7 @@ moduleFor(
           init() {
             this._super(...arguments);
 
-            this.router.on('routeWillChange', transition => {
+            this.router.on('routeWillChange', (transition) => {
               assert.equal(transition.to.name, 'dynamicWithChild.child');
               assert.deepEqual(transition.to.paramNames, ['child_id']);
               assert.deepEqual(transition.to.params, { child_id: '456' });
@@ -654,7 +662,7 @@ moduleFor(
               }
             });
 
-            this.router.on('routeDidChange', transition => {
+            this.router.on('routeDidChange', (transition) => {
               assert.equal(transition.to.name, 'dynamicWithChild.child');
               assert.deepEqual(transition.to.paramNames, ['child_id']);
               assert.deepEqual(transition.to.params, { child_id: '456' });
@@ -677,123 +685,6 @@ moduleFor(
         initial = false;
         return this.routerService.transitionTo('/dynamic-with-child/456/456');
       });
-    }
-  }
-);
-
-moduleFor(
-  'Router Service - deprecated events',
-  class extends RouterTestCase {
-    '@test willTransition events are deprecated'() {
-      return this.visit('/').then(() => {
-        expectDeprecation(() => {
-          this.routerService['_router'].on('willTransition', () => {});
-        }, 'You attempted to listen to the "willTransition" event which is deprecated. Please inject the router service and listen to the "routeWillChange" event.');
-      });
-    }
-
-    async '@test willTransition events are deprecated on routes'() {
-      this.add(
-        'route:application',
-        Route.extend({
-          init() {
-            this._super(...arguments);
-            this.on('willTransition', () => {});
-          },
-        })
-      );
-      await expectDeprecationAsync(
-        () => this.visit('/'),
-        'You attempted to listen to the "willTransition" event which is deprecated. Please inject the router service and listen to the "routeWillChange" event.'
-      );
-    }
-
-    async '@test didTransition events are deprecated on routes'() {
-      this.add(
-        'route:application',
-        Route.extend({
-          init() {
-            this._super(...arguments);
-            this.on('didTransition', () => {});
-          },
-        })
-      );
-      await expectDeprecationAsync(
-        () => this.visit('/'),
-        'You attempted to listen to the "didTransition" event which is deprecated. Please inject the router service and listen to the "routeDidChange" event.'
-      );
-    }
-
-    '@test other events are not deprecated on routes'() {
-      this.add(
-        'route:application',
-        Route.extend({
-          init() {
-            this._super(...arguments);
-            this.on('fixx', () => {});
-          },
-        })
-      );
-      expectNoDeprecation(() => {
-        return this.visit('/');
-      });
-    }
-
-    '@test didTransition events are deprecated'() {
-      return this.visit('/').then(() => {
-        expectDeprecation(() => {
-          this.routerService['_router'].on('didTransition', () => {});
-        }, 'You attempted to listen to the "didTransition" event which is deprecated. Please inject the router service and listen to the "routeDidChange" event.');
-      });
-    }
-
-    '@test other events are not deprecated'() {
-      return this.visit('/').then(() => {
-        expectNoDeprecation(() => {
-          this.routerService['_router'].on('wat', () => {});
-        });
-      });
-    }
-  }
-);
-
-moduleFor(
-  'Router Service: deprecated willTransition hook',
-  class extends RouterTestCase {
-    get routerOptions() {
-      return {
-        willTransition() {
-          this._super(...arguments);
-          // Overrides
-        },
-      };
-    }
-
-    async '@test willTransition hook is deprecated'() {
-      await expectDeprecationAsync(
-        () => this.visit('/'),
-        'You attempted to override the "willTransition" method which is deprecated. Please inject the router service and listen to the "routeWillChange" event.'
-      );
-    }
-  }
-);
-moduleFor(
-  'Router Service: deprecated didTransition hook',
-  class extends RouterTestCase {
-    get routerOptions() {
-      return {
-        didTransition() {
-          this._super(...arguments);
-          // Overrides
-        },
-      };
-    }
-
-    async '@test didTransition hook is deprecated'() {
-      await expectDeprecationAsync(
-        () => this.visit('/'),
-        'You attempted to override the "didTransition" method which is deprecated. Please inject the router service and listen to the "routeDidChange" event.'
-      );
     }
   }
 );

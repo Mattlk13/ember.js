@@ -1,8 +1,6 @@
 import { Component } from '@ember/-internals/glimmer';
-import { Object as EmberObject } from '@ember/-internals/runtime';
+import EmberObject, { action } from '@ember/object';
 import { moduleFor, RenderingTestCase, strip } from 'internal-test-helpers';
-
-import { action } from '../index';
 
 moduleFor(
   '@action decorator',
@@ -233,7 +231,7 @@ moduleFor(
     '@test action decorator throws an error if passed a function in native classes'() {
       expectAssertion(() => {
         class TestObject extends EmberObject {
-          @action(function() {}) foo = 'bar';
+          @action(function () {}) foo = 'bar';
         }
 
         new TestObject();
@@ -242,7 +240,7 @@ moduleFor(
 
     '@test action decorator can be used as a classic decorator with strings'(assert) {
       let FooComponent = Component.extend({
-        foo: action(function() {
+        foo: action(function () {
           assert.ok(true, 'called!');
         }),
       });
@@ -259,7 +257,7 @@ moduleFor(
 
     '@test action decorator can be used as a classic decorator directly'(assert) {
       let FooComponent = Component.extend({
-        foo: action(function() {
+        foo: action(function () {
           assert.ok(true, 'called!');
         }),
       });

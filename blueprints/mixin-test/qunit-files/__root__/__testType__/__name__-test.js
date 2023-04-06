@@ -4,8 +4,8 @@ import { module, test } from 'qunit';
 
 module('<%= friendlyTestName %>');
 
-// Replace this with your real tests.
-test('it works', function(assert) {
+// TODO: Replace this with your real tests.
+test('it works', function (assert) {
   let <%= classifiedModuleName %>Object = EmberObject.extend(<%= classifiedModuleName %>Mixin);
   let subject = <%= classifiedModuleName %>Object.create();
   assert.ok(subject);

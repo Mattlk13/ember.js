@@ -15,10 +15,10 @@
   });
   ```
 
-  ```app/templates/components/person-profile.hbs
-  {{name}}
-  <div>{{name}}</div>
-  <span data-name={{name}}></span>
+  ```app/components/person-profile.hbs
+  {{this.name}}
+  <div>{{this.name}}</div>
+  <span data-name={{this.name}}></span>
   ```
 
   Any time the "name" property on the component changes, the DOM will be
@@ -27,8 +27,8 @@
   Properties can be chained as well:
 
   ```handlebars
-  {{aUserModel.name}}
-  <div>{{listOfUsers.firstObject.name}}</div>
+  {{@aUserModel.name}}
+  <div>{{@listOfUsers.firstObject.name}}</div>
   ```
 
   ### Using Ember helpers
@@ -36,19 +36,19 @@
   When content is passed in mustaches `{{}}`, Ember will first try to find a helper
   or component with that name. For example, the `if` helper:
 
-  ```handlebars
-  {{if name "I have a name" "I have no name"}}
-  <span data-has-name={{if name true}}></span>
+  ```app/components/person-profile.hbs
+  {{if this.name "I have a name" "I have no name"}}
+  <span data-has-name={{if this.name true}}></span>
   ```
 
   The returned value is placed where the `{{}}` is called. The above style is
   called "inline". A second style of helper usage is called "block". For example:
 
   ```handlebars
-  {{#if name}}
-  I have a name
+  {{#if this.name}}
+    I have a name
   {{else}}
-  I have no name
+    I have no name
   {{/if}}
   ```
 
@@ -58,8 +58,8 @@
   helper will add " Doe" to a displayed name if the person has no last name:
 
   ```handlebars
-  <span data-name={{concat firstName (
-  if lastName (concat " " lastName) "Doe"
+  <span data-name={{concat this.firstName (
+    if this.lastName (concat " " this.lastName) "Doe"
   )}}></span>
   ```
 
@@ -89,38 +89,6 @@
  */
 
 /**
-  Use the `{{with}}` helper when you want to alias a property to a new name. This is helpful
-  for semantic clarity as it allows you to retain default scope or to reference a property from another
-  `{{with}}` block.
-
-  If the aliased property is "falsey", for example: `false`, `undefined` `null`, `""`, `0`, `NaN` or
-  an empty array, the block will not be rendered.
-
-  ```handlebars
-  {{! Will only render if user.posts contains items}}
-  {{#with user.posts as |blogPosts|}}
-    <div class="notice">
-      There are {{blogPosts.length}} blog posts written by {{user.name}}.
-    </div>
-    {{#each blogPosts as |post|}}
-      <li>{{post.title}}</li>
-    {{/each}}
-  {{/with}}
-  ```
-
-  NOTE: The alias should not reuse a name from the bound property path.
-
-  For example: `{{#with foo.bar as |foo|}}` is not supported because it attempts to alias using
-  the first part of the property path, `foo`. Instead, use `{{#with foo.bar as |baz|}}`.
-
-  @method with
-  @for Ember.Templates.helpers
-  @param {Object} options
-  @return {String} HTML string
-  @public
- */
-
-/**
   `{{yield}}` denotes an area of a template that will be rendered inside
   of another template.
 
@@ -130,14 +98,14 @@
   template, an optional block passed to the component should render:
 
   ```app/templates/application.hbs
-  {{#labeled-textfield value=someProperty}}
+  <LabeledTextfield @value={{@model.name}}>
     First name:
-  {{/labeled-textfield}}
+  </LabeledTextfield>
   ```
 
-  ```app/templates/components/labeled-textfield.hbs
+  ```app/components/labeled-textfield.hbs
   <label>
-    {{yield}} {{input value=value}}
+    {{yield}} <Input @value={{@value}} />
   </label>
   ```
 
@@ -152,17 +120,17 @@
   Additionally you can `yield` properties into the context for use by the consumer:
 
   ```app/templates/application.hbs
-  {{#labeled-textfield value=someProperty validator=(action 'firstNameValidator') as |validationError|}}
+  <LabeledTextfield @value={{@model.validation}} @validator={{this.firstNameValidator}} as |validationError|>
     {{#if validationError}}
       <p class="error">{{validationError}}</p>
     {{/if}}
     First name:
-  {{/labeled-textfield}}
+  </LabeledTextfield>
   ```
 
-  ```app/templates/components/labeled-textfield.hbs
+  ```app/components/labeled-textfield.hbs
   <label>
-    {{yield validationError}} {{input value=value}}
+    {{yield this.validationError}} <Input @value={{@value}} />
   </label>
   ```
 
@@ -174,6 +142,157 @@
     First name: <input type="text" />
   </label>
   ```
+
+  `yield` can also be used with the `hash` helper:
+
+  ```app/templates/application.hbs
+  <DateRanges @value={{@model.date}} as |range|>
+    Start date: {{range.start}}
+    End date: {{range.end}}
+  </DateRanges>
+  ```
+
+  ```app/components/date-ranges.hbs
+  <div>
+    {{yield (hash start=@value.start end=@value.end)}}
+  </div>
+  ```
+
+  Result:
+
+  ```html
+  <div>
+    Start date: July 1st
+    End date: July 30th
+  </div>
+  ```
+
+  Multiple values can be yielded as block params:
+
+  ```app/templates/application.hbs
+  <Banner @value={{@model}} as |title subtitle body|>
+    <h1>{{title}}</h1>
+    <h2>{{subtitle}}</h2>
+    {{body}}
+  </Banner>
+  ```
+
+  ```app/components/banner.hbs
+  <div>
+    {{yield "Hello title" "hello subtitle" "body text"}}
+  </div>
+  ```
+
+  Result:
+
+  ```html
+  <div>
+    <h1>Hello title</h1>
+    <h2>hello subtitle</h2>
+    body text
+  </div>
+  ```
+
+  However, it is preferred to use the hash helper, as this can prevent breaking changes to your component and also simplify the api for the component.
+
+  Multiple components can be yielded with the `hash` and `component` helper:
+
+  ```app/templates/application.hbs
+  <Banner @value={{@model}} as |banner|>
+    <banner.Title>Banner title</banner.Title>
+    <banner.Subtitle>Banner subtitle</banner.Subtitle>
+    <banner.Body>A load of body text</banner.Body>
+  </Banner>
+  ```
+
+  ```app/components/banner.js
+  import Title from './banner/title';
+  import Subtitle from './banner/subtitle';
+  import Body from './banner/body';
+
+  export default class Banner extends Component {
+    Title = Title;
+    Subtitle = Subtitle;
+    Body = Body;
+  }
+  ```
+
+  ```app/components/banner.hbs
+  <div>
+    {{yield (hash
+      Title=this.Title
+      Subtitle=this.Subtitle
+      Body=(component this.Body defaultArg="some value")
+    )}}
+  </div>
+  ```
+
+  Result:
+
+  ```html
+  <div>
+    <h1>Banner title</h1>
+    <h2>Banner subtitle</h2>
+    A load of body text
+  </div>
+  ```
+
+  A benefit of using this pattern is that the user of the component can change the order the components are displayed.
+
+  ```app/templates/application.hbs
+  <Banner @value={{@model}} as |banner|>
+    <banner.Subtitle>Banner subtitle</banner.Subtitle>
+    <banner.Title>Banner title</banner.Title>
+    <banner.Body>A load of body text</banner.Body>
+  </Banner>
+  ```
+
+  Result:
+
+  ```html
+  <div>
+    <h2>Banner subtitle</h2>
+    <h1>Banner title</h1>
+    A load of body text
+  </div>
+  ```
+
+  Another benefit to using `yield` with the `hash` and `component` helper
+  is you can pass attributes and arguments to these components:
+
+  ```app/templates/application.hbs
+  <Banner @value={{@model}} as |banner|>
+    <banner.Subtitle class="mb-1">Banner subtitle</banner.Subtitle>
+    <banner.Title @variant="loud">Banner title</banner.Title>
+    <banner.Body>A load of body text</banner.Body>
+  </Banner>
+  ```
+
+  ```app/components/banner/subtitle.hbs
+  {{!-- note the use of ..attributes --}}
+  <h2 ...attributes>
+    {{yield}}
+  </h2>
+  ```
+
+  ```app/components/banner/title.hbs
+  {{#if (eq @variant "loud")}}
+      <h1 class="loud">{{yield}}</h1>
+  {{else}}
+      <h1 class="quiet">{{yield}}</h1>
+  {{/if}}
+  ```
+
+  Result:
+
+  ```html
+  <div>
+    <h2 class="mb-1">Banner subtitle</h2>
+    <h1 class="loud">Banner title</h1>
+    A load of body text
+  </div>
+  ```
+
   @method yield
   @for Ember.Templates.helpers
   @param {Hash} options
@@ -182,9 +301,10 @@
  */
 
 /**
-  `{{has-block}}` indicates if the component was invoked with a block.
+  `{{(has-block)}}` indicates if the component was invoked with a block.
 
   This component is invoked with a block:
+
   ```handlebars
   {{#my-component}}
     Hi Jen!
@@ -192,11 +312,13 @@
   ```
 
   This component is invoked without a block:
+
   ```handlebars
   {{my-component}}
   ```
 
   Using angle bracket invocation, this looks like:
+
   ```html
   <MyComponent>Hi Jen!</MyComponent> {{! with a block}}
   ```
@@ -216,7 +338,7 @@
   {{/if}}
   ```
 
-  @method hasBlock
+  @method has-block
   @for Ember.Templates.helpers
   @param {String} the name of the block. The name (at the moment) is either "main" or "inverse" (though only curly components support inverse)
   @return {Boolean} `true` if the component was invoked with a block
@@ -224,9 +346,10 @@
  */
 
 /**
-  `{{has-block-params}}` indicates if the component was invoked with block params.
+  `{{(has-block-params)}}` indicates if the component was invoked with block params.
 
   This component is invoked with block params:
+
   ```handlebars
   {{#my-component as |favoriteFlavor|}}
     Hi Jen!
@@ -234,10 +357,27 @@
   ```
 
   This component is invoked without block params:
+
   ```handlebars
   {{#my-component}}
     Hi Jenn!
   {{/my-component}}
+  ```
+
+  With angle bracket syntax, block params look like this:
+
+    ```handlebars
+  <MyComponent as |favoriteFlavor|>
+    Hi Jen!
+  </MyComponent>
+  ```
+
+  And without block params:
+
+  ```handlebars
+  <MyComponent>
+    Hi Jen!
+  </MyComponent>
   ```
 
   This is useful when you want to create a component that can render itself
@@ -245,7 +385,7 @@
 
   ```app/templates/components/my-component.hbs
   {{#if (has-block-params)}}
-    Welcome {{yield favoriteFlavor}}, we're happy you're here and hope you
+    Welcome {{yield this.favoriteFlavor}}, we're happy you're here and hope you
     enjoy your favorite ice cream flavor.
   {{else}}
     Welcome {{yield}}, we're happy you're here, but we're unsure what
@@ -253,7 +393,7 @@
   {{/if}}
   ```
 
-  @method hasBlockParams
+  @method has-block-params
   @for Ember.Templates.helpers
   @param {String} the name of the block. The name (at the moment) is either "main" or "inverse" (though only curly components support inverse)
   @return {Boolean} `true` if the component was invoked with block params
@@ -280,7 +420,7 @@
   `get` is also aware of keywords. So in this situation
 
   ```handlebars
-  {{#each items as |item|}}
+  {{#each this.items as |item|}}
     {{debugger}}
   {{/each}}
   ```
@@ -303,96 +443,36 @@
   @public
  */
 
-/**
-  The `partial` helper renders another template without
-  changing the template context:
-
-  ```handlebars
-  {{foo}}
-  {{partial "nav"}}
-  ```
-
-  The above example template will render a template named
-  "-nav", which has the same context as the parent template
-  it's rendered into, so if the "-nav" template also referenced
-  `{{foo}}`, it would print the same thing as the `{{foo}}`
-  in the above example.
-
-  If a "-nav" template isn't found, the `partial` helper will
-  fall back to a template named "nav".
-
-  ### Bound template names
-
-  The parameter supplied to `partial` can also be a path
-  to a property containing a template name, e.g.:
-
-  ```handlebars
-  {{partial someTemplateName}}
-  ```
-
-  The above example will look up the value of `someTemplateName`
-  on the template context (e.g. a controller) and use that
-  value as the name of the template to render. If the resolved
-  value is falsy, nothing will be rendered. If `someTemplateName`
-  changes, the partial will be re-rendered using the new template
-  name.
-
-  @method partial
-  @for Ember.Templates.helpers
-  @param {String} partialName The name of the template to render minus the leading underscore.
-  @public
-*/
+export { templateFactory as template, templateCacheCounters } from '@glimmer/opcode-compiler';
 
 export { default as RootTemplate } from './lib/templates/root';
-export {
-  default as template,
-  counters as templateCacheCounters,
-  Factory as TemplateFactory,
-  OwnedTemplate,
-} from './lib/template';
-export { default as Checkbox } from './lib/components/checkbox';
-export { default as TextField } from './lib/components/text-field';
-export { default as TextArea } from './lib/components/textarea';
-export { default as LinkComponent } from './lib/components/link-to';
-export { default as Component, ROOT_REF } from './lib/component';
+export { default as Input } from './lib/components/input';
+export { default as LinkTo } from './lib/components/link-to';
+export { default as Textarea } from './lib/components/textarea';
+export { default as Component } from './lib/component';
 export { default as Helper, helper } from './lib/helper';
-export { default as Environment } from './lib/environment';
 export { SafeString, escapeExpression, htmlSafe, isHTMLSafe } from './lib/utils/string';
-export {
-  Renderer,
-  InertRenderer,
-  InteractiveRenderer,
-  _resetRenderers,
-  renderSettled,
-} from './lib/renderer';
+export { Renderer, _resetRenderers, renderSettled } from './lib/renderer';
 export {
   getTemplate,
   setTemplate,
   hasTemplate,
   getTemplates,
   setTemplates,
+  TemplatesRegistry,
 } from './lib/template_registry';
 export { setupEngineRegistry, setupApplicationRegistry } from './lib/setup-registry';
 export { DOMChanges, NodeDOMTreeConstruction, DOMTreeConstruction } from './lib/dom';
-export {
-  registerMacros as _registerMacros,
-  experimentalMacros as _experimentalMacros,
-} from './lib/syntax';
-export { default as AbstractComponentManager } from './lib/component-managers/abstract';
 
 // needed for test
 // TODO just test these through public API
 // a lot of these are testing how a problem was solved
 // rather than the problem was solved
-// DebugStack should just test the assert message
-// it supports for example
-export { UpdatableReference, INVOKE } from './lib/utils/references';
-export { default as iterableFor } from './lib/utils/iterable';
-export { default as DebugStack } from './lib/utils/debug-stack';
-export { default as OutletView } from './lib/views/outlet';
-export { capabilities } from './lib/component-managers/custom';
-export { setComponentManager, getComponentManager } from './lib/utils/custom-component-manager';
-export { setModifierManager, getModifierManager } from './lib/utils/custom-modifier-manager';
-export { capabilities as modifierCapabilities } from './lib/modifiers/custom';
+export { default as OutletView, BootEnvironment } from './lib/views/outlet';
+export { OutletState } from './lib/utils/outlet';
+export {
+  componentCapabilities,
+  modifierCapabilities,
+  setComponentManager,
+} from './lib/utils/managers';
 export { isSerializationFirstNode } from './lib/utils/serialization-first-node-helpers';
-export { setComponentTemplate, getComponentTemplate } from './lib/utils/component-template';

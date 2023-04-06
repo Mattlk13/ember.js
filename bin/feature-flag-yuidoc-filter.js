@@ -40,7 +40,7 @@ function updateClassReferencesInNamespaces(data) {
     let namespaceClasses = {};
     let originalClasses = data.modules[namespace].classes;
     for (let className in originalClasses) {
-      if (data.classes.hasOwnProperty(className)) {
+      if (Object.prototype.hasOwnProperty.call(data.classes, className)) {
         namespaceClasses[className] = originalClasses[className];
       }
     }
@@ -48,7 +48,7 @@ function updateClassReferencesInNamespaces(data) {
   }
 }
 
-module.exports = function(data) {
+module.exports = function (data) {
   let featuresToFilter = gatherFeatures();
   data.classes = gatherClassesToDocument(data, featuresToFilter);
   updateClassReferencesInNamespaces(data);

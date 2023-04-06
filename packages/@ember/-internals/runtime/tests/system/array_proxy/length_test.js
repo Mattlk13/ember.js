@@ -1,10 +1,10 @@
-import ArrayProxy from '../../../lib/system/array_proxy';
-import EmberObject from '../../../lib/system/object';
-import { observer } from '@ember/-internals/metal';
+import ArrayProxy from '@ember/array/proxy';
+import EmberObject, { observer } from '@ember/object';
 import { oneWay as reads, not } from '@ember/object/computed';
-import { A as a } from '../../../lib/mixins/array';
+import { A as a } from '@ember/array';
 import { moduleFor, AbstractTestCase, runTask, runLoopSettled } from 'internal-test-helpers';
-import { set, get } from '@ember/-internals/metal';
+import { set, get } from '@ember/object';
+import { createCache, getValue } from '@glimmer/validator';
 
 moduleFor(
   'Ember.ArrayProxy - content change (length)',
@@ -202,6 +202,52 @@ moduleFor(
       assert.equal(cCalled, 2, 'expected observer `colors.content.length` to be called TWICE');
       assert.equal(dCalled, 2, 'expected observer `colors.[]` to be called TWICE');
       assert.equal(eCalled, 2, 'expected observer `colors.content.[]` to be called TWICE');
+
+      obj.destroy();
+    }
+
+    async ['@test array proxy length is reactive when accessed normally'](assert) {
+      let proxy = ArrayProxy.create({
+        content: a([1, 2, 3]),
+      });
+
+      let lengthCache = createCache(() => proxy.length);
+
+      assert.equal(getValue(lengthCache), 3, 'length is correct');
+
+      proxy.pushObject(4);
+
+      assert.equal(getValue(lengthCache), 4, 'length is correct');
+
+      proxy.removeObject(1);
+
+      assert.equal(getValue(lengthCache), 3, 'length is correct');
+
+      proxy.set('content', []);
+
+      assert.equal(getValue(lengthCache), 0, 'length is correct');
+    }
+
+    async ['@test array proxy length is reactive when accessed using get'](assert) {
+      let proxy = ArrayProxy.create({
+        content: a([1, 2, 3]),
+      });
+
+      let lengthCache = createCache(() => get(proxy, 'length'));
+
+      assert.equal(getValue(lengthCache), 3, 'length is correct');
+
+      proxy.pushObject(4);
+
+      assert.equal(getValue(lengthCache), 4, 'length is correct');
+
+      proxy.removeObject(1);
+
+      assert.equal(getValue(lengthCache), 3, 'length is correct');
+
+      proxy.set('content', []);
+
+      assert.equal(getValue(lengthCache), 0, 'length is correct');
     }
   }
 );

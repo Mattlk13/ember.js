@@ -13,7 +13,7 @@ const fs = require('fs');
 const serve = serveStatic('./dist/', { index: ['index.html', 'index.htm'] });
 
 // Create server.
-const server = http.createServer(function(req, res) {
+const server = http.createServer(function (req, res) {
   let done = finalhandler(req, res);
   serve(req, res, done);
 });
@@ -35,6 +35,10 @@ function getBrowserRunner() {
 }
 
 function run(queryString) {
+  if (process.env.DEBUG_RENDER_TREE) {
+    queryString = `${queryString}&debugrendertree`;
+  }
+
   let url = 'http://localhost:' + PORT + '/tests/?' + queryString;
   return runInBrowser(url, 3);
 }
@@ -54,39 +58,29 @@ function generateTestsFor(packageName) {
   }
 
   testFunctions.push(() => run('package=' + packageName));
+  testFunctions.push(() => run('package=' + packageName + '&edition=classic'));
   testFunctions.push(() => run('package=' + packageName + '&prebuilt=true'));
   testFunctions.push(() => run('package=' + packageName + '&enableoptionalfeatures=true'));
-
-  // TODO: this should ultimately be deleted (when all packages can run with and
-  // without jQuery)
-  if (packageName !== 'ember') {
-    testFunctions.push(() => run('package=' + packageName + '&jquery=none'));
-  }
 }
 
 function generateEachPackageTests() {
   fs.readdirSync('packages/@ember')
-    .filter(e => e !== '-internals')
-    .forEach(e => generateTestsFor(`@ember/${e}`));
+    .filter((e) => e !== '-internals')
+    .forEach((e) => generateTestsFor(`@ember/${e}`));
 
-  fs.readdirSync('packages/@ember/-internals').forEach(e =>
+  fs.readdirSync('packages/@ember/-internals').forEach((e) =>
     generateTestsFor(`@ember/-internals/${e}`)
   );
 
   fs.readdirSync('packages')
-    .filter(e => e !== '@ember')
+    .filter((e) => e !== '@ember')
     .forEach(generateTestsFor);
 }
 
 function generateStandardTests() {
   testFunctions.push(() => run(''));
+  testFunctions.push(() => run('edition=classic'));
   testFunctions.push(() => run('enableoptionalfeatures=true'));
-}
-
-function generateOldJQueryTests() {
-  testFunctions.push(() => run('jquery=1.10.2'));
-  testFunctions.push(() => run('jquery=1.12.4'));
-  testFunctions.push(() => run('jquery=2.2.4'));
 }
 
 function generateExtendPrototypeTests() {
@@ -108,11 +102,11 @@ function runInSequence(tasks) {
 
 function runAndExit() {
   runInSequence(testFunctions)
-    .then(function() {
+    .then(function () {
       console.log(chalk.green('Passed!'));
       process.exit(0);
     })
-    .catch(function(err) {
+    .catch(function (err) {
       console.error(chalk.red(err.toString()));
       console.error(chalk.red('Failed!'));
       process.exit(1);
@@ -131,15 +125,13 @@ switch (process.env.TEST_SUITE) {
     generateEachPackageTests();
     runAndExit();
     break;
-  case 'old-jquery-and-extend-prototypes':
-    console.log('suite: old-jquery-and-extend-prototypes');
-    generateOldJQueryTests();
+  case 'extend-prototypes':
+    console.log('suite: extend-prototypes');
     generateExtendPrototypeTests();
     runAndExit();
     break;
   case 'all':
     console.log('suite: all');
-    generateOldJQueryTests();
     generateExtendPrototypeTests();
     generateEachPackageTests();
     runAndExit();

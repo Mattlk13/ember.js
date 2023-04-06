@@ -1,4 +1,4 @@
-import { A as emberA } from '../../lib/mixins/array';
+import { A as emberA } from '@ember/array';
 import { AbstractTestCase } from 'internal-test-helpers';
 import { runArrayTests } from '../helpers/array';
 
@@ -9,7 +9,7 @@ class AnyTests extends AbstractTestCase {
     let found = [];
     let result;
 
-    result = obj.any(function(i) {
+    result = obj.any(function (i) {
       found.push(i);
       return false;
     });
@@ -26,7 +26,7 @@ class AnyTests extends AbstractTestCase {
     let found = [];
     let result;
 
-    result = obj.any(function(i) {
+    result = obj.any(function (i) {
       found.push(i);
       return --cnt <= 0;
     });
@@ -39,7 +39,7 @@ class AnyTests extends AbstractTestCase {
     let obj = emberA([0, 1, 2]);
     let result;
 
-    result = obj.any(i => Boolean(i));
+    result = obj.any((i) => Boolean(i));
     this.assert.equal(result, true, 'return value of obj.any');
   }
 

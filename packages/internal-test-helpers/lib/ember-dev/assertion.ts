@@ -1,15 +1,15 @@
 import { DEBUG } from '@glimmer/env';
-import { callWithStub, checkTest, DebugEnv, Message } from './utils';
+import type { DebugEnv, Message } from './utils';
+import { callWithStub, checkTest } from './utils';
 
 type ExpectAssertionFunc = (func: () => void, expectedMessage: Message) => void;
 type IgnoreAssertionFunc = (func: () => void) => void;
 
-declare global {
-  interface Window {
+type ExtendedWindow = Window &
+  typeof globalThis & {
     expectAssertion: ExpectAssertionFunc | null;
     ignoreAssertion: IgnoreAssertionFunc | null;
-  }
-}
+  };
 
 const BREAK = {};
 
@@ -30,10 +30,10 @@ const BREAK = {};
   In particular, this prevents `Ember.assert` from throw errors that would
   disrupt the control flow.
 */
-export function setupAssertionHelpers(hooks: NestedHooks, env: DebugEnv) {
+export function setupAssertionHelpers(hooks: NestedHooks, env: DebugEnv): void {
   let originalAssertFunc = env.getDebugFunction('assert');
 
-  hooks.beforeEach(function(assert) {
+  hooks.beforeEach(function (assert) {
     let expectAssertion: ExpectAssertionFunc = (func: () => void, expectedMessage: Message) => {
       if (!DEBUG) {
         assert.ok(true, 'Assertions disabled in production builds.');
@@ -63,21 +63,23 @@ export function setupAssertionHelpers(hooks: NestedHooks, env: DebugEnv) {
       check(assert, sawCall, actualMessage, expectedMessage);
     };
 
-    let ignoreAssertion: IgnoreAssertionFunc = func => {
+    let ignoreAssertion: IgnoreAssertionFunc = (func) => {
       callWithStub(env, 'assert', func);
     };
 
-    window.expectAssertion = expectAssertion;
-    window.ignoreAssertion = ignoreAssertion;
+    let w = window as ExtendedWindow;
+    w.expectAssertion = expectAssertion;
+    w.ignoreAssertion = ignoreAssertion;
   });
 
-  hooks.afterEach(function() {
+  hooks.afterEach(function () {
     // Edge will occasionally not run finally blocks, so we have to be extra
     // sure we restore the original assert function
     env.setDebugFunction('assert', originalAssertFunc);
 
-    window.expectAssertion = null;
-    window.ignoreAssertion = null;
+    let w = window as ExtendedWindow;
+    w.expectAssertion = null;
+    w.ignoreAssertion = null;
   });
 }
 

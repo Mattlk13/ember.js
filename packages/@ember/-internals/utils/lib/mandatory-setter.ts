@@ -1,28 +1,51 @@
-import { EMBER_METAL_TRACKED_PROPERTIES } from '@ember/canary-features';
 import { assert } from '@ember/debug';
 import { DEBUG } from '@glimmer/env';
+import { _WeakSet as WeakSet } from '@glimmer/util';
+import type { Tag } from '@glimmer/validator';
 import lookupDescriptor from './lookup-descriptor';
 
-export let setupMandatorySetter: ((obj: object, keyName: string | symbol) => void) | undefined;
-export let teardownMandatorySetter: ((obj: object, keyName: string | symbol) => void) | undefined;
-export let setWithMandatorySetter:
-  | ((obj: object, keyName: string | symbol, value: any) => void)
+export let setupMandatorySetter:
+  | ((tag: Tag, obj: object, keyName: string | symbol) => void)
   | undefined;
+export let teardownMandatorySetter: ((obj: object, keyName: string | symbol) => void) | undefined;
+export let setWithMandatorySetter: ((obj: object, keyName: string, value: any) => void) | undefined;
 
 type PropertyDescriptorWithMeta = PropertyDescriptor & { hadOwnProperty?: boolean };
 
-if (DEBUG && EMBER_METAL_TRACKED_PROPERTIES) {
-  let MANDATORY_SETTERS: WeakMap<
-    object,
-    // @ts-ignore
-    { [key: string | symbol]: PropertyDescriptorWithMeta }
-  > = new WeakMap();
+function isElementKey(key: string | number | symbol) {
+  return typeof key === 'number' ? isPositiveInt(key) : isStringInt(key as string);
+}
 
-  let propertyIsEnumerable = function(obj: object, key: string | symbol) {
+function isStringInt(str: string) {
+  let num = parseInt(str, 10);
+  return isPositiveInt(num) && str === String(num);
+}
+
+function isPositiveInt(num: number) {
+  return num >= 0 && num % 1 === 0;
+}
+
+if (DEBUG) {
+  let SEEN_TAGS = new WeakSet();
+
+  let MANDATORY_SETTERS: WeakMap<object, { [key: string | symbol]: PropertyDescriptorWithMeta }> =
+    new WeakMap();
+
+  let propertyIsEnumerable = function (obj: object, key: string | symbol) {
     return Object.prototype.propertyIsEnumerable.call(obj, key);
   };
 
-  setupMandatorySetter = function(obj: object, keyName: string | symbol) {
+  setupMandatorySetter = function (tag: Tag, obj: object, keyName: string | symbol) {
+    if (SEEN_TAGS.has(tag)) {
+      return;
+    }
+
+    SEEN_TAGS.add(tag);
+
+    if (Array.isArray(obj) && isElementKey(keyName)) {
+      return;
+    }
+
     let desc = (lookupDescriptor(obj, keyName) as PropertyDescriptorWithMeta) || {};
 
     if (desc.get || desc.set) {
@@ -71,21 +94,21 @@ if (DEBUG && EMBER_METAL_TRACKED_PROPERTIES) {
     });
   };
 
-  teardownMandatorySetter = function(obj: object, keyName: string | symbol) {
+  teardownMandatorySetter = function (obj: object, keyName: string | symbol) {
     let setters = MANDATORY_SETTERS.get(obj);
 
     if (setters !== undefined && setters[keyName] !== undefined) {
-      Object.defineProperty(obj, keyName, setters[keyName]);
+      Object.defineProperty(obj, keyName, setters[keyName]!);
 
-      setters[keyName] = undefined;
+      delete setters[keyName];
     }
   };
 
-  setWithMandatorySetter = function(obj: object, keyName: string | symbol, value: any) {
+  setWithMandatorySetter = function (obj: object, keyName: string, value: any) {
     let setters = MANDATORY_SETTERS.get(obj);
 
     if (setters !== undefined && setters[keyName] !== undefined) {
-      let setter = setters[keyName];
+      let setter = setters[keyName]!;
 
       if (setter.set) {
         setter.set.call(obj, value);
@@ -102,7 +125,7 @@ if (DEBUG && EMBER_METAL_TRACKED_PROPERTIES) {
         }
       }
     } else {
-      obj[keyName] = value;
+      (obj as any)[keyName] = value;
     }
   };
 }

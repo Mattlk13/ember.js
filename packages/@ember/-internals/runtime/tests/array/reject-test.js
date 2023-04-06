@@ -1,19 +1,19 @@
 import { AbstractTestCase } from 'internal-test-helpers';
 import { runArrayTests } from '../helpers/array';
-import EmberObject from '../../lib/system/object';
+import EmberObject from '@ember/object';
 
 class RejectTest extends AbstractTestCase {
   '@test should reject any item that does not meet the condition'() {
     let obj = this.newObject([1, 2, 3, 4]);
     let result;
 
-    result = obj.reject(i => i < 3);
+    result = obj.reject((i) => i < 3);
     this.assert.deepEqual(result, [3, 4], 'reject the correct items');
   }
 
   '@test should be the inverse of filter'() {
     let obj = this.newObject([1, 2, 3, 4]);
-    let isEven = i => i % 2 === 0;
+    let isEven = (i) => i % 2 === 0;
     let filtered, rejected;
 
     filtered = obj.filter(isEven);

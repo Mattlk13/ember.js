@@ -1,4 +1,6 @@
-import { AST, ASTPlugin, ASTPluginEnvironment } from '@glimmer/syntax';
+import type { AST, ASTPlugin } from '@glimmer/syntax';
+import type { EmberASTPluginEnvironment } from '../types';
+import { isPath } from './utils';
 
 /**
  @module ember
@@ -8,19 +10,19 @@ import { AST, ASTPlugin, ASTPluginEnvironment } from '@glimmer/syntax';
   A Glimmer2 AST transformation that replaces all instances of
 
   ```handlebars
- {{#each-in iterableThing as |key value|}}
+  {{#each-in iterableThing as |key value|}}
   ```
 
   with
 
   ```handlebars
- {{#each (-each-in iterableThing) as |value key|}}
+  {{#each (-each-in iterableThing) as |value key|}}
   ```
 
   @private
   @class TransformHasBlockSyntax
 */
-export default function transformEachInIntoEach(env: ASTPluginEnvironment): ASTPlugin {
+export default function transformEachInIntoEach(env: EmberASTPluginEnvironment): ASTPlugin {
   let { builders: b } = env.syntax;
 
   return {
@@ -28,8 +30,8 @@ export default function transformEachInIntoEach(env: ASTPluginEnvironment): ASTP
 
     visitor: {
       BlockStatement(node: AST.BlockStatement): AST.Node | void {
-        if (node.path.original === 'each-in') {
-          node.params[0] = b.sexpr(b.path('-each-in'), [node.params[0]]);
+        if (isPath(node.path) && node.path.original === 'each-in') {
+          node.params[0] = b.sexpr(b.path('-each-in'), [node.params[0]!]);
 
           let blockParams = node.program.blockParams;
 
@@ -38,7 +40,7 @@ export default function transformEachInIntoEach(env: ASTPluginEnvironment): ASTP
           } else if (blockParams.length === 1) {
             // insert a dummy variable for the first slot
             // pick a name that won't parse so it won't shadow any real variables
-            blockParams = ['( unused value )', blockParams[0]];
+            blockParams = ['( unused value )', blockParams[0]!];
           } else {
             let key = blockParams.shift()!;
             let value = blockParams.shift()!;

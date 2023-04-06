@@ -1,6 +1,6 @@
 import { AbstractTestCase, runLoopSettled } from 'internal-test-helpers';
 import { runArrayTests, newFixture } from '../helpers/array';
-import { get } from '@ember/-internals/metal';
+import { get } from '@ember/object';
 
 class ReverseObjectsTests extends AbstractTestCase {
   async '@test [A,B,C].reverseObjects() => [] + notify'() {
@@ -32,6 +32,8 @@ class ReverseObjectsTests extends AbstractTestCase {
       1,
       'should have notified lastObject once'
     );
+
+    obj.destroy();
   }
 }
 

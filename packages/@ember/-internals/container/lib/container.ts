@@ -1,22 +1,21 @@
-import { Factory, LookupOptions, Owner, OWNER, setOwner } from '@ember/-internals/owner';
-import { dictionary, HAS_NATIVE_PROXY } from '@ember/-internals/utils';
-import { EMBER_MODULE_UNIFICATION } from '@ember/canary-features';
+import type {
+  InternalFactory,
+  FactoryClass,
+  InternalOwner,
+  RegisterOptions,
+  FactoryManager,
+  FullName,
+} from '@ember/-internals/owner';
+import { setOwner } from '@ember/-internals/owner';
+import { dictionary } from '@ember/-internals/utils';
 import { assert } from '@ember/debug';
-import { assign } from '@ember/polyfills';
 import { DEBUG } from '@glimmer/env';
-import Registry, { DebugRegistry, Injection } from './registry';
-
-declare global {
-  export function gc(): void;
-}
+import type { DebugRegistry } from './registry';
+import type Registry from './registry';
 
 interface LeakTracking {
   hasContainers(): boolean;
   reset(): void;
-}
-
-interface CacheMember {
-  destroy?: () => void;
 }
 
 let leakTracking: LeakTracking;
@@ -33,6 +32,7 @@ if (DEBUG) {
         containers = new WeakSet<Container>();
         return {
           hasContainers() {
+            // @ts-expect-error We just checked if it is definied
             gc();
             return GetWeakSetValues(containers).length > 0;
           },
@@ -51,9 +51,9 @@ if (DEBUG) {
 }
 
 export interface ContainerOptions {
-  owner?: Owner;
-  cache?: { [key: string]: CacheMember };
-  factoryManagerCache?: { [key: string]: FactoryManager<any, any> };
+  owner?: InternalOwner;
+  cache?: { [key: string]: object };
+  factoryManagerCache?: { [key: string]: InternalFactoryManager<any, any> };
   validationCache?: { [key: string]: boolean };
 }
 
@@ -73,10 +73,10 @@ export interface ContainerOptions {
 export default class Container {
   static _leakTracking: LeakTracking;
 
-  readonly owner: Owner | null;
+  readonly owner: InternalOwner | null;
   readonly registry: Registry & DebugRegistry;
-  cache: { [key: string]: CacheMember };
-  factoryManagerCache!: { [key: string]: FactoryManager<any, any> };
+  cache: { [key: string]: object };
+  factoryManagerCache!: { [key: string]: InternalFactoryManager<object> };
   readonly validationCache!: { [key: string]: boolean };
   isDestroyed: boolean;
   isDestroying: boolean;
@@ -144,12 +144,16 @@ export default class Container {
     @private
    @method lookup
    @param {String} fullName
-   @param {Object} [options]
-   @param {String} [options.source] The fullname of the request source (used for local lookup)
+   @param {RegisterOptions} [options]
    @return {any}
    */
-  lookup(fullName: string, options: LookupOptions): any {
-    assert('expected container not to be destroyed', !this.isDestroyed);
+  lookup(
+    fullName: string,
+    options?: RegisterOptions
+  ): InternalFactory<object> | object | undefined {
+    if (this.isDestroyed) {
+      throw new Error(`Cannot call \`.lookup('${fullName}')\` after the owner has been destroyed`);
+    }
     assert('fullName must be a proper full name', this.registry.isValidFullName(fullName));
     return lookup(this, this.registry.normalize(fullName), options);
   }
@@ -161,8 +165,9 @@ export default class Container {
    @method destroy
    */
   destroy(): void {
-    destroyDestroyables(this);
     this.isDestroying = true;
+
+    destroyDestroyables(this);
   }
 
   finalizeDestroy(): void {
@@ -177,7 +182,7 @@ export default class Container {
    @method reset
    @param {String} fullName optional key to reset; if missing, resets everything
   */
-  reset(fullName: string) {
+  reset(fullName: FullName) {
     if (this.isDestroyed) return;
     if (fullName === undefined) {
       destroyDestroyables(this);
@@ -195,7 +200,9 @@ export default class Container {
    @returns { Object }
   */
   ownerInjection() {
-    return { [OWNER]: this.owner };
+    let injection = {};
+    setOwner(injection, this.owner!);
+    return injection;
   }
 
   /**
@@ -206,28 +213,19 @@ export default class Container {
     @public
    @method factoryFor
    @param {String} fullName
-   @param {Object} [options]
-   @param {String} [options.source] The fullname of the request source (used for local lookup)
    @return {any}
    */
-  factoryFor<T, C>(fullName: string, options: LookupOptions = {}): Factory<T, C> | undefined {
-    assert('expected container not to be destroyed', !this.isDestroyed);
+  factoryFor(fullName: FullName): InternalFactoryManager<object> | undefined {
+    if (this.isDestroyed) {
+      throw new Error(
+        `Cannot call \`.factoryFor('${fullName}')\` after the owner has been destroyed`
+      );
+    }
     let normalizedName = this.registry.normalize(fullName);
 
     assert('fullName must be a proper full name', this.registry.isValidFullName(normalizedName));
-    assert(
-      'EMBER_MODULE_UNIFICATION must be enabled to pass a namespace option to factoryFor',
-      EMBER_MODULE_UNIFICATION || !options.namespace
-    );
 
-    if (options.source || options.namespace) {
-      normalizedName = this.registry.expandLocalLookup(fullName, options);
-      if (!normalizedName) {
-        return;
-      }
-    }
-
-    return factoryFor<T, C>(this, normalizedName, fullName) as Factory<T, C> | undefined;
+    return factoryFor(this, normalizedName, fullName);
   }
 }
 
@@ -239,58 +237,52 @@ if (DEBUG) {
  * Wrap a factory manager in a proxy which will not permit properties to be
  * set on the manager.
  */
-function wrapManagerInDeprecationProxy<T, C>(manager: FactoryManager<T, C>) {
-  if (HAS_NATIVE_PROXY) {
-    let validator = {
-      set(_obj: T, prop: keyof T) {
-        throw new Error(
-          `You attempted to set "${prop}" on a factory manager created by container#factoryFor. A factory manager is a read-only construct.`
-        );
-      },
-    };
+function wrapManagerInDeprecationProxy<T extends object, C extends object | FactoryClass>(
+  manager: InternalFactoryManager<T, C>
+): InternalFactoryManager<T, C> {
+  let validator = {
+    set(_obj: T, prop: keyof T) {
+      throw new Error(
+        `You attempted to set "${String(
+          prop
+        )}" on a factory manager created by container#factoryFor. A factory manager is a read-only construct.`
+      );
+    },
+  };
 
-    // Note:
-    // We have to proxy access to the manager here so that private property
-    // access doesn't cause the above errors to occur.
-    let m = manager;
-    let proxiedManager = {
-      class: m.class,
-      create(props?: { [prop: string]: any }) {
-        return m.create(props);
-      },
-    };
+  // Note:
+  // We have to proxy access to the manager here so that private property
+  // access doesn't cause the above errors to occur.
+  let m = manager;
+  let proxiedManager = {
+    class: m.class,
+    create(props?: Partial<T>) {
+      return m.create(props);
+    },
+  };
 
-    let proxy = new Proxy(proxiedManager, validator as any);
-    FACTORY_FOR.set(proxy, manager);
-  }
-
-  return manager;
+  return new Proxy(proxiedManager, validator as any) as any;
 }
 
-function isSingleton(container: Container, fullName: string) {
+function isSingleton(container: Container, fullName: FullName) {
   return container.registry.getOption(fullName, 'singleton') !== false;
 }
 
-function isInstantiatable(container: Container, fullName: string) {
+function isInstantiatable(container: Container, fullName: FullName) {
   return container.registry.getOption(fullName, 'instantiate') !== false;
 }
 
-function lookup(container: Container, fullName: string, options: LookupOptions = {}) {
-  assert(
-    'EMBER_MODULE_UNIFICATION must be enabled to pass a namespace option to lookup',
-    EMBER_MODULE_UNIFICATION || !options.namespace
-  );
-
+function lookup(
+  container: Container,
+  fullName: FullName,
+  options: RegisterOptions = {}
+): InternalFactory<object> | object | undefined {
   let normalizedName = fullName;
 
-  if (options.source || options.namespace) {
-    normalizedName = container.registry.expandLocalLookup(fullName, options);
-    if (!normalizedName) {
-      return;
-    }
-  }
-
-  if (options.singleton !== false) {
+  if (
+    options.singleton === true ||
+    (options.singleton === undefined && isSingleton(container, fullName))
+  ) {
     let cached = container.cache[normalizedName];
     if (cached !== undefined) {
       return cached;
@@ -300,14 +292,18 @@ function lookup(container: Container, fullName: string, options: LookupOptions =
   return instantiateFactory(container, normalizedName, fullName, options);
 }
 
-function factoryFor<T, C>(container: Container, normalizedName: string, fullName: string) {
+function factoryFor(
+  container: Container,
+  normalizedName: FullName,
+  fullName: FullName
+): InternalFactoryManager<object> | undefined {
   let cached = container.factoryManagerCache[normalizedName];
 
   if (cached !== undefined) {
     return cached;
   }
 
-  let factory = container.registry.resolve(normalizedName) as DebugFactory<T, C> | undefined;
+  let factory = container.registry.resolve(normalizedName) as DebugFactory<object> | undefined;
 
   if (factory === undefined) {
     return;
@@ -317,7 +313,7 @@ function factoryFor<T, C>(container: Container, normalizedName: string, fullName
     factory._onLookup(fullName);
   }
 
-  let manager = new FactoryManager(container, factory, fullName, normalizedName);
+  let manager = new InternalFactoryManager(container, factory, fullName, normalizedName);
 
   if (DEBUG) {
     manager = wrapManagerInDeprecationProxy(manager);
@@ -327,15 +323,10 @@ function factoryFor<T, C>(container: Container, normalizedName: string, fullName
   return manager;
 }
 
-interface FactoryOptions {
-  instantiate?: boolean;
-  singleton?: boolean;
-}
-
 function isSingletonClass(
   container: Container,
-  fullName: string,
-  { instantiate, singleton }: FactoryOptions
+  fullName: FullName,
+  { instantiate, singleton }: RegisterOptions
 ) {
   return (
     singleton !== false &&
@@ -347,21 +338,21 @@ function isSingletonClass(
 
 function isSingletonInstance(
   container: Container,
-  fullName: string,
-  { instantiate, singleton }: FactoryOptions
+  fullName: FullName,
+  { instantiate, singleton }: RegisterOptions
 ) {
   return (
     singleton !== false &&
     instantiate !== false &&
-    isSingleton(container, fullName) &&
+    (singleton === true || isSingleton(container, fullName)) &&
     isInstantiatable(container, fullName)
   );
 }
 
 function isFactoryClass(
   container: Container,
-  fullname: string,
-  { instantiate, singleton }: FactoryOptions
+  fullname: FullName,
+  { instantiate, singleton }: RegisterOptions
 ) {
   return (
     instantiate === false &&
@@ -372,22 +363,22 @@ function isFactoryClass(
 
 function isFactoryInstance(
   container: Container,
-  fullName: string,
-  { instantiate, singleton }: FactoryOptions
+  fullName: FullName,
+  { instantiate, singleton }: RegisterOptions
 ) {
   return (
     instantiate !== false &&
-    (singleton !== false || isSingleton(container, fullName)) &&
+    (singleton === false || !isSingleton(container, fullName)) &&
     isInstantiatable(container, fullName)
   );
 }
 
 function instantiateFactory(
   container: Container,
-  normalizedName: string,
-  fullName: string,
-  options: FactoryOptions
-) {
+  normalizedName: FullName,
+  fullName: FullName,
+  options: RegisterOptions
+): InternalFactory<object> | object | undefined {
   let factoryManager = factoryFor(container, normalizedName, fullName);
 
   if (factoryManager === undefined) {
@@ -397,7 +388,17 @@ function instantiateFactory(
   // SomeClass { singleton: true, instantiate: true } | { singleton: true } | { instantiate: true } | {}
   // By default majority of objects fall into this case
   if (isSingletonInstance(container, fullName, options)) {
-    return (container.cache[normalizedName] = factoryManager.create());
+    let instance = (container.cache[normalizedName] = factoryManager.create());
+
+    // if this lookup happened _during_ destruction (emits a deprecation, but
+    // is still possible) ensure that it gets destroyed
+    if (container.isDestroying) {
+      if (typeof (instance as any).destroy === 'function') {
+        (instance as any).destroy();
+      }
+    }
+
+    return instance;
   }
 
   // SomeClass { singleton: false, instantiate: true }
@@ -416,81 +417,16 @@ function instantiateFactory(
   throw new Error('Could not create factory');
 }
 
-interface BuildInjectionsResult {
-  injections: { [key: string]: object } | undefined;
-  isDynamic: boolean;
-}
-
-function processInjections(
-  container: Container,
-  injections: Injection[],
-  result: BuildInjectionsResult
-) {
-  if (DEBUG) {
-    container.registry.validateInjections(injections);
-  }
-
-  let hash = result.injections;
-  if (hash === undefined) {
-    hash = result.injections = {};
-  }
-
-  for (let i = 0; i < injections.length; i++) {
-    let { property, specifier, source } = injections[i];
-
-    if (source) {
-      hash[property] = lookup(container, specifier, { source });
-    } else {
-      hash[property] = lookup(container, specifier);
-    }
-
-    if (!result.isDynamic) {
-      result.isDynamic = !isSingleton(container, specifier);
-    }
-  }
-}
-
-function buildInjections(
-  container: Container,
-  typeInjections: Injection[],
-  injections: Injection[]
-): BuildInjectionsResult {
-  let result: BuildInjectionsResult = {
-    injections: undefined,
-    isDynamic: false,
-  };
-
-  if (typeInjections !== undefined) {
-    processInjections(container, typeInjections, result);
-  }
-
-  if (injections !== undefined) {
-    processInjections(container, injections, result);
-  }
-
-  return result;
-}
-
-function injectionsFor(container: Container, fullName: string) {
-  let registry = container.registry;
-  let [type] = fullName.split(':');
-
-  let typeInjections = registry.getTypeInjections(type);
-  let injections = registry.getInjections(fullName);
-
-  return buildInjections(container, typeInjections, injections);
-}
-
 function destroyDestroyables(container: Container): void {
   let cache = container.cache;
   let keys = Object.keys(cache);
 
-  for (let i = 0; i < keys.length; i++) {
-    let key = keys[i];
+  for (let key of keys) {
     let value = cache[key];
+    assert('has cached value', value);
 
-    if (value.destroy) {
-      value.destroy();
+    if ((value as any).destroy) {
+      (value as any).destroy();
     }
   }
 }
@@ -508,8 +444,8 @@ function resetMember(container: Container, fullName: string) {
   if (member) {
     delete container.cache[fullName];
 
-    if (member.destroy) {
-      member.destroy();
+    if ((member as any).destroy) {
+      (member as any).destroy();
     }
   }
 }
@@ -520,36 +456,64 @@ export interface LazyInjection {
   specifier: string;
 }
 
-declare interface DebugFactory<T, C> extends Factory<T, C> {
+declare interface DebugFactory<T extends object, C extends FactoryClass | object = FactoryClass>
+  extends InternalFactory<T, C> {
   _onLookup?: (fullName: string) => void;
-  _initFactory?: (factoryManager: FactoryManager<T, C>) => void;
-  _lazyInjections(): { [key: string]: LazyInjection };
+  _lazyInjections?: () => { [key: string]: LazyInjection };
+  _initFactory?: (factoryManager: InternalFactoryManager<T, C>) => void;
 }
 
-export const FACTORY_FOR = new WeakMap<any, FactoryManager<any, any>>();
-class FactoryManager<T, C> {
+export const INIT_FACTORY = Symbol('INIT_FACTORY');
+
+interface MaybeHasInitFactory {
+  [INIT_FACTORY]?: InternalFactoryManager<object, FactoryClass | object>;
+}
+
+export function getFactoryFor(
+  obj: object
+): InternalFactoryManager<object, FactoryClass | object> | undefined {
+  // SAFETY: since we know `obj` is an `object`, we also know we can safely ask
+  // whether a key is set on it.
+  return (obj as MaybeHasInitFactory)[INIT_FACTORY];
+}
+
+export function setFactoryFor<T extends object, C extends FactoryClass | object>(
+  obj: object,
+  factory: InternalFactoryManager<T, C>
+): void {
+  // SAFETY: since we know `obj` is an `object`, we also know we can safely set
+  // a key it safely at this location. (The only way this could be blocked is if
+  // someone has gone out of their way to use `Object.defineProperty()` with our
+  // internal-only symbol and made it `writable: false`.)
+  (obj as MaybeHasInitFactory)[INIT_FACTORY] = factory;
+}
+
+export class InternalFactoryManager<
+  T extends object,
+  C extends FactoryClass | object = FactoryClass
+> implements FactoryManager<T>
+{
   readonly container: Container;
-  readonly owner: Owner | null;
-  readonly class: Factory<T, C> & DebugFactory<T, C>;
-  readonly fullName: string;
+  readonly owner: InternalOwner | null;
+  readonly class: DebugFactory<T, C>;
+  readonly fullName: FullName;
   readonly normalizedName: string;
   private madeToString: string | undefined;
-  injections: { [key: string]: object } | undefined;
+  injections: { [key: string]: unknown } | undefined;
 
   constructor(
     container: Container,
-    factory: Factory<T, C>,
-    fullName: string,
+    factory: InternalFactory<T, C>,
+    fullName: FullName,
     normalizedName: string
   ) {
     this.container = container;
     this.owner = container.owner;
-    this.class = factory as Factory<T, C> & DebugFactory<T, C>;
+    this.class = factory;
     this.fullName = fullName;
     this.normalizedName = normalizedName;
     this.madeToString = undefined;
     this.injections = undefined;
-    FACTORY_FOR.set(this, this);
   }
 
   toString(): string {
@@ -560,20 +524,18 @@ class FactoryManager<T, C> {
     return this.madeToString;
   }
 
-  create(options?: { [prop: string]: any }) {
-    let injectionsCache = this.injections;
-    if (injectionsCache === undefined) {
-      let { injections, isDynamic } = injectionsFor(this.container, this.normalizedName);
-      injectionsCache = injections;
-      if (!isDynamic) {
-        this.injections = injections;
-      }
+  create(options?: Partial<T>) {
+    let { container } = this;
+
+    if (container.isDestroyed) {
+      throw new Error(
+        `Cannot create new instances after the owner has been destroyed (you attempted to create ${this.fullName})`
+      );
     }
 
-    let props = injectionsCache;
-    if (options !== undefined) {
-      props = assign({}, injectionsCache, options);
-    }
+    let props = options ? { ...options } : {};
+    setOwner(props, container.owner!);
+    setFactoryFor(props, this);
 
     if (DEBUG) {
       let lazyInjections;
@@ -591,36 +553,13 @@ class FactoryManager<T, C> {
       }
 
       validationCache[this.fullName] = true;
-    }
 
-    if (!this.class.create) {
-      throw new Error(
-        `Failed to create an instance of '${this.normalizedName}'. Most likely an improperly defined class or an invalid module export.`
+      assert(
+        `Failed to create an instance of '${this.normalizedName}'. Most likely an improperly defined class or an invalid module export.`,
+        typeof this.class.create === 'function'
       );
     }
 
-    // required to allow access to things like
-    // the customized toString, _debugContainerKey,
-    // owner, etc. without a double extend and without
-    // modifying the objects properties
-    if (typeof this.class._initFactory === 'function') {
-      this.class._initFactory(this);
-    } else {
-      // in the non-EmberObject case we need to still setOwner
-      // this is required for supporting glimmer environment and
-      // template instantiation which rely heavily on
-      // `options[OWNER]` being passed into `create`
-      // TODO: clean this up, and remove in future versions
-      if (options === undefined || props === undefined) {
-        // avoid mutating `props` here since they are the cached injections
-        props = assign({}, props);
-      }
-      setOwner(props, this.owner!);
-    }
-
-    let instance = this.class.create(props);
-    FACTORY_FOR.set(instance, this);
-
-    return instance;
+    return this.class.create(props);
   }
 }

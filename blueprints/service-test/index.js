@@ -1,39 +1,33 @@
 'use strict';
 
+const maybePolyfillTypeScriptBlueprints = require('../-maybe-polyfill-typescript-blueprints');
+const { modulePrefixForProject } = require('../-utils');
 const useTestFrameworkDetector = require('../test-framework-detector');
-const isModuleUnificationProject = require('../module-unification').isModuleUnificationProject;
 
 module.exports = useTestFrameworkDetector({
   description: 'Generates a service unit test.',
 
-  fileMapTokens() {
-    if (isModuleUnificationProject(this.project)) {
-      return {
-        __root__(options) {
-          if (options.pod) {
-            throw new Error("Pods aren't supported within a module unification app");
-          }
+  shouldTransformTypeScript: true,
 
-          return 'src';
-        },
-        __testType__() {
-          return '';
-        },
-      };
-    } else {
-      return {
-        __root__() {
-          return 'tests';
-        },
-        __testType__() {
-          return 'unit';
-        },
-      };
-    }
+  init() {
+    this._super && this._super.init.apply(this, arguments);
+    maybePolyfillTypeScriptBlueprints(this);
+  },
+
+  fileMapTokens() {
+    return {
+      __root__() {
+        return 'tests';
+      },
+      __testType__() {
+        return 'unit';
+      },
+    };
   },
 
   locals(options) {
     return {
+      modulePrefix: modulePrefixForProject(options.project),
       friendlyTestDescription: ['Unit', 'Service', options.entity.name].join(' | '),
     };
   },

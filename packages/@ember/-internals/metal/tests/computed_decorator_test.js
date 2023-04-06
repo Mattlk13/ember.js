@@ -1,4 +1,4 @@
-import { Object as EmberObject } from '@ember/-internals/runtime';
+import EmberObject from '@ember/object';
 import { computed, get, set, setProperties } from '..';
 import { moduleFor, AbstractTestCase } from 'internal-test-helpers';
 
@@ -57,7 +57,7 @@ moduleFor(
         first = 'rob';
         last = 'jackson';
 
-        @computed('first', 'last', function() {
+        @computed('first', 'last', function () {
           assert.equal(this.first, 'rob');
           assert.equal(this.last, 'jackson');
         })
@@ -301,6 +301,7 @@ moduleFor(
         }
         set foo(value) {
           this.__foo = `computed ${value}`;
+          // eslint-disable-next-line no-setter-return
           return this.__foo;
         }
       }
@@ -320,7 +321,7 @@ moduleFor(
           }
         }
         new Obj();
-      }, "Only one computed property decorator can be applied to a class field or accessor, but 'foo' was decorated twice. You may have added the decorator to both a getter and setter, which is unecessary.");
+      }, "Only one computed property decorator can be applied to a class field or accessor, but 'foo' was decorated twice. You may have added the decorator to both a getter and setter, which is unnecessary.");
     }
   }
 );

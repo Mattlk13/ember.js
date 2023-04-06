@@ -1,41 +1,36 @@
-import { Renderer } from '@ember/-internals/glimmer';
-import { getOwner, Owner } from '@ember/-internals/owner';
-/* globals Element */
+import type { View } from '@ember/-internals/glimmer/lib/renderer';
+import type { InternalOwner } from '@ember/-internals/owner';
+import { getOwner } from '@ember/-internals/owner';
 import { guidFor } from '@ember/-internals/utils';
 import { assert } from '@ember/debug';
-import { Dict, Option } from '@glimmer/interfaces';
+import type { Dict, Option } from '@glimmer/interfaces';
+import type { SimpleElement } from '@simple-dom/interface';
 
 /**
 @module ember
 */
 
-export function isSimpleClick(event: MouseEvent) {
+export function isSimpleClick(event: Event): boolean {
+  if (!(event instanceof MouseEvent)) {
+    return false;
+  }
   let modifier = event.shiftKey || event.metaKey || event.altKey || event.ctrlKey;
   let secondaryClick = event.which > 1; // IE9 may return undefined
 
   return !modifier && !secondaryClick;
 }
 
-export function constructStyleDeprecationMessage(affectedStyle: string) {
+export function constructStyleDeprecationMessage(affectedStyle: string): string {
   return (
     '' +
     'Binding style attributes may introduce cross-site scripting vulnerabilities; ' +
     'please ensure that values being bound are properly escaped. For more information, ' +
     'including how to disable this warning, see ' +
-    'https://emberjs.com/deprecations/v1.x/#toc_binding-style-attributes. ' +
+    'https://deprecations.emberjs.com/v1.x/#toc_binding-style-attributes. ' +
     'Style affected: "' +
     affectedStyle +
     '"'
   );
-}
-
-interface View {
-  parentView: Option<View>;
-  renderer: Renderer;
-  tagName?: string;
-  elementId?: string;
-  isDestroying: boolean;
-  isDestroyed: boolean;
 }
 
 /**
@@ -43,13 +38,14 @@ interface View {
   @method getRootViews
   @param {Object} owner
 */
-export function getRootViews(owner: Owner): View[] {
-  let registry = owner.lookup<Dict<View>>('-view-registry:main')!;
+export function getRootViews(owner: InternalOwner): View[] {
+  let registry = owner.lookup('-view-registry:main') as Dict<View>;
 
   let rootViews: View[] = [];
 
-  Object.keys(registry).forEach(id => {
+  Object.keys(registry).forEach((id) => {
     let view = registry[id];
+    assert('expected view', view);
 
     if (view.parentView === null) {
       rootViews.push(view);
@@ -72,10 +68,10 @@ export function getViewId(view: View): string {
   }
 }
 
-const ELEMENT_VIEW: WeakMap<Element, View> = new WeakMap();
-const VIEW_ELEMENT: WeakMap<View, Element> = new WeakMap();
+const ELEMENT_VIEW: WeakMap<SimpleElement, View> = new WeakMap();
+const VIEW_ELEMENT: WeakMap<View, SimpleElement> = new WeakMap();
 
-export function getElementView(element: Element): Option<View> {
+export function getElementView(element: SimpleElement): Option<View> {
   return ELEMENT_VIEW.get(element) || null;
 }
 
@@ -84,15 +80,15 @@ export function getElementView(element: Element): Option<View> {
   @method getViewElement
   @param {Ember.View} view
  */
-export function getViewElement(view: View): Option<Element> {
+export function getViewElement(view: View): Option<SimpleElement> {
   return VIEW_ELEMENT.get(view) || null;
 }
 
-export function setElementView(element: Element, view: View): void {
+export function setElementView(element: SimpleElement, view: View): void {
   ELEMENT_VIEW.set(element, view);
 }
 
-export function setViewElement(view: View, element: Element): void {
+export function setViewElement(view: View, element: SimpleElement): void {
   VIEW_ELEMENT.set(view, element);
 }
 
@@ -101,7 +97,7 @@ export function setViewElement(view: View, element: Element): void {
 // this case, we want to prevent access to the element (and vice verse) during
 // destruction.
 
-export function clearElementView(element: Element): void {
+export function clearElementView(element: SimpleElement): void {
   ELEMENT_VIEW.delete(element);
 }
 
@@ -116,9 +112,10 @@ const CHILD_VIEW_IDS: WeakMap<View, Set<string>> = new WeakMap();
   @method getChildViews
   @param {Ember.View} view
 */
-export function getChildViews(view: View) {
+export function getChildViews(view: View): View[] {
   let owner = getOwner(view);
-  let registry = owner.lookup<Dict<View>>('-view-registry:main')!;
+  assert('View is unexpectedly missing an owner', owner);
+  let registry = owner.lookup('-view-registry:main') as Dict<View>;
   return collectChildViews(view, registry);
 }
 
@@ -142,7 +139,7 @@ export function collectChildViews(view: View, registry: Dict<View>): View[] {
   let childViews = CHILD_VIEW_IDS.get(view);
 
   if (childViews !== undefined) {
-    childViews.forEach(id => {
+    childViews.forEach((id) => {
       let view = registry[id];
       if (view && !view.isDestroying && !view.isDestroyed) {
         views.push(view);
@@ -171,8 +168,8 @@ export function getViewRange(view: View): Range {
   let bounds = getViewBounds(view);
 
   let range = document.createRange();
-  range.setStartBefore(bounds.firstNode as Node);
-  range.setEndAfter(bounds.lastNode as Node);
+  range.setStartBefore(bounds.firstNode as unknown as Node);
+  range.setEndAfter(bounds.lastNode as unknown as Node);
 
   return range;
 }
@@ -188,7 +185,7 @@ export function getViewRange(view: View): Range {
   @method getViewClientRects
   @param {Ember.View} view
 */
-export function getViewClientRects(view: View): ClientRectList | DOMRectList {
+export function getViewClientRects(view: View): DOMRectList {
   let range = getViewRange(view);
   return range.getClientRects();
 }
@@ -218,21 +215,14 @@ export function getViewBoundingClientRect(view: View): ClientRect | DOMRect {
   @param {String} selector
 */
 export const elMatches: typeof Element.prototype.matches | undefined =
-  typeof Element !== 'undefined'
-    ? Element.prototype.matches ||
-      Element.prototype['matchesSelector'] ||
-      Element.prototype['mozMatchesSelector'] ||
-      Element.prototype['msMatchesSelector'] ||
-      Element.prototype['oMatchesSelector'] ||
-      Element.prototype['webkitMatchesSelector']
-    : undefined;
+  typeof Element !== 'undefined' ? Element.prototype.matches : undefined;
 
-export function matches(el: Element, selector: string) {
+export function matches(el: Element, selector: string): boolean {
   assert('cannot call `matches` in fastboot mode', elMatches !== undefined);
-  return elMatches!.call(el, selector);
+  return elMatches.call(el, selector);
 }
 
-export function contains(a: Node, b: Node) {
+export function contains(a: Node, b: Node): boolean {
   if (a.contains !== undefined) {
     return a.contains(b);
   }

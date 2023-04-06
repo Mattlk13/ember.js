@@ -1,11 +1,6 @@
 import { context } from '@ember/-internals/environment';
 import { getName, setName } from '@ember/-internals/utils';
 
-// TODO, this only depends on context, otherwise it could be in utils
-// move into its own package
-// it is needed by Mixin for classToString
-// maybe move it into environment
-
 const hasOwnProperty = Object.prototype.hasOwnProperty;
 
 let searchDisabled = false;
@@ -52,8 +47,7 @@ export function findNamespaces(): void {
   }
   let lookup = context.lookup;
   let keys = Object.keys(lookup);
-  for (let i = 0; i < keys.length; i++) {
-    let key = keys[i];
+  for (let key of keys) {
     // Only process entities that start with uppercase A-Z
     if (!isUppercase(key.charCodeAt(0))) {
       continue;
@@ -86,22 +80,12 @@ export function processAllNamespaces(): void {
   if (unprocessedNamespaces || unprocessedMixins) {
     let namespaces = NAMESPACES;
 
-    for (let i = 0; i < namespaces.length; i++) {
-      processNamespace(namespaces[i]);
+    for (let namespace of namespaces) {
+      processNamespace(namespace);
     }
 
     unprocessedMixins = false;
   }
-}
-
-export function classToString(this: object): string {
-  let name = getName(this);
-  if (name !== void 0) {
-    return name;
-  }
-  name = calculateToString(this);
-  setName(this, name);
-  return name;
 }
 
 export function isSearchDisabled(): boolean {
@@ -116,7 +100,11 @@ export function setUnprocessedMixins(): void {
   unprocessedMixins = true;
 }
 
-function _processNamespace(paths: string[], root: Namespace, seen: Set<Namespace>): void {
+function _processNamespace<N extends Namespace>(
+  paths: string[],
+  root: N,
+  seen: Set<Namespace>
+): void {
   let idx = paths.length;
 
   let id = paths.join('.');
@@ -129,7 +117,7 @@ function _processNamespace(paths: string[], root: Namespace, seen: Set<Namespace
     if (!hasOwnProperty.call(root, key)) {
       continue;
     }
-    let obj = root[key];
+    let obj: unknown = root[key];
 
     // If we are processing the `Ember` namespace, for example, the
     // `paths` will start with `["Ember"]`. Every iteration through
@@ -139,11 +127,11 @@ function _processNamespace(paths: string[], root: Namespace, seen: Set<Namespace
     paths[idx] = key;
 
     // If we have found an unprocessed class
-    if (obj && obj.toString === classToString && getName(obj) === void 0) {
+    if (obj && getName(obj as object) === void 0) {
       // Replace the class' `toString` with the dot-separated path
-      setName(obj, paths.join('.'));
+      setName(obj as object, paths.join('.'));
       // Support nested namespaces
-    } else if (obj && obj.isNamespace) {
+    } else if (obj && isNamespace(obj)) {
       // Skip aliased namespaces
       if (seen.has(obj)) {
         continue;
@@ -157,6 +145,10 @@ function _processNamespace(paths: string[], root: Namespace, seen: Set<Namespace
   paths.length = idx; // cut out last item
 }
 
+function isNamespace(obj: unknown): obj is Namespace {
+  return obj != null && typeof obj === 'object' && (obj as Namespace).isNamespace;
+}
+
 function isUppercase(code: number): boolean {
   return (
     code >= 65 && code <= 90 // A
@@ -168,36 +160,10 @@ function tryIsNamespace(lookup: { [k: string]: any }, prop: string): Namespace |
     let obj = lookup[prop];
     return (
       ((obj !== null && typeof obj === 'object') || typeof obj === 'function') &&
-      (obj as any).isNamespace &&
+      obj.isNamespace &&
       obj
     );
   } catch (e) {
     // continue
   }
-}
-
-function calculateToString(target: object): string {
-  let str;
-
-  if (!searchDisabled) {
-    processAllNamespaces();
-
-    str = getName(target);
-    if (str !== void 0) {
-      return str;
-    }
-    let superclass = target;
-    do {
-      superclass = Object.getPrototypeOf(superclass);
-      if (superclass === Function.prototype || superclass === Object.prototype) {
-        break;
-      }
-      str = getName(target);
-      if (str !== void 0) {
-        str = `(subclass of ${str})`;
-        break;
-      }
-    } while (str === void 0);
-  }
-  return str || '(unknown)';
 }

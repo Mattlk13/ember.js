@@ -5,11 +5,14 @@ const path = require('path');
 const chalk = require('chalk');
 const stringUtil = require('ember-cli-string-utils');
 const EmberRouterGenerator = require('ember-router-generator');
-const useEditionDetector = require('../edition-detector');
-const isModuleUnificationProject = require('../module-unification').isModuleUnificationProject;
+const SilentError = require('silent-error');
 
-module.exports = useEditionDetector({
+const maybePolyfillTypeScriptBlueprints = require('../-maybe-polyfill-typescript-blueprints');
+
+module.exports = {
   description: 'Generates a route and a template, and registers the route with the router.',
+
+  shouldTransformTypeScript: true,
 
   availableOptions: [
     {
@@ -28,89 +31,74 @@ module.exports = useEditionDetector({
     },
   ],
 
-  fileMapTokens: function() {
-    if (isModuleUnificationProject(this.project)) {
-      return {
-        __root__(options) {
-          if (options.pod) {
-            throw new Error("Pods aren't supported within a module unification app");
-          }
-          if (options.inDummy) {
-            return path.join('tests', 'dummy', 'src');
-          }
-          return 'src';
-        },
-        __path__(options) {
-          return path.join('ui', 'routes', options.dasherizedModuleName);
-        },
-        __name__() {
-          return 'route';
-        },
-        __templatepath__(options) {
-          return path.join('ui', 'routes', options.dasherizedModuleName);
-        },
-        __templatename__() {
-          return 'template';
-        },
-      };
-    } else {
-      return {
-        __name__(options) {
-          if (options.pod) {
-            return 'route';
-          }
-          return options.locals.moduleName;
-        },
-        __path__(options) {
-          if (options.pod) {
-            return path.join(options.podPath, options.locals.moduleName);
-          }
-          return 'routes';
-        },
-        __templatepath__(options) {
-          if (options.pod) {
-            return path.join(options.podPath, options.locals.moduleName);
-          }
-          return 'templates';
-        },
-        __templatename__(options) {
-          if (options.pod) {
-            return 'template';
-          }
-          return options.locals.moduleName;
-        },
-        __root__(options) {
-          if (options.inRepoAddon) {
-            return path.join('lib', options.inRepoAddon, 'addon');
-          }
-
-          if (options.inDummy) {
-            return path.join('tests', 'dummy', 'app');
-          }
-
-          if (options.inAddon) {
-            return 'addon';
-          }
-
-          return 'app';
-        },
-      };
-    }
+  init() {
+    this._super && this._super.init.apply(this, arguments);
+    maybePolyfillTypeScriptBlueprints(this);
   },
 
-  locals: function(options) {
+  fileMapTokens: function () {
+    return {
+      __name__(options) {
+        if (options.pod) {
+          return 'route';
+        }
+        return options.locals.moduleName;
+      },
+      __path__(options) {
+        if (options.pod) {
+          return path.join(options.podPath, options.locals.moduleName);
+        }
+        return 'routes';
+      },
+      __templatepath__(options) {
+        if (options.pod) {
+          return path.join(options.podPath, options.locals.moduleName);
+        }
+        return 'templates';
+      },
+      __templatename__(options) {
+        if (options.pod) {
+          return 'template';
+        }
+        return options.locals.moduleName;
+      },
+      __root__(options) {
+        if (options.inRepoAddon) {
+          return path.join('lib', options.inRepoAddon, 'addon');
+        }
+
+        if (options.inDummy) {
+          return path.join('tests', 'dummy', 'app');
+        }
+
+        if (options.inAddon) {
+          return 'addon';
+        }
+
+        return 'app';
+      },
+    };
+  },
+
+  locals: function (options) {
     let moduleName = options.entity.name;
+    let rawRouteName = moduleName.split('/').pop();
+    let emberPageTitleExists = 'ember-page-title' in options.project.dependencies();
+    let hasDynamicSegment = options.path && options.path.includes(':');
 
     if (options.resetNamespace) {
-      moduleName = moduleName.split('/').pop();
+      moduleName = rawRouteName;
     }
 
     return {
       moduleName: stringUtil.dasherize(moduleName),
+      routeName: stringUtil.classify(rawRouteName),
+      addTitle: emberPageTitleExists,
+      hasDynamicSegment,
     };
   },
 
-  shouldEntityTouchRouter: function(name) {
+  shouldEntityTouchRouter: function (name) {
     let isIndex = name === 'index';
     let isBasic = name === 'basic';
     let isApplication = name === 'application';
@@ -118,7 +106,7 @@ module.exports = useEditionDetector({
     return !isBasic && !isIndex && !isApplication;
   },
 
-  shouldTouchRouter: function(name, options) {
+  shouldTouchRouter: function (name, options) {
     let entityTouchesRouter = this.shouldEntityTouchRouter(name);
     let isDummy = Boolean(options.dummy);
     let isAddon = Boolean(options.project.isEmberCLIAddon());
@@ -133,17 +121,17 @@ module.exports = useEditionDetector({
     );
   },
 
-  afterInstall: function(options) {
+  afterInstall: function (options) {
     updateRouter.call(this, 'add', options);
   },
 
-  afterUninstall: function(options) {
+  afterUninstall: function (options) {
     updateRouter.call(this, 'remove', options);
   },
-  normalizeEntityName: function(entityName) {
+  normalizeEntityName: function (entityName) {
     return entityName.replace(/\.js$/, ''); //Prevent generation of ".js.js" files
   },
-});
+};
 
 function updateRouter(action, options) {
   let entity = options.entity;
@@ -161,21 +149,42 @@ function updateRouter(action, options) {
   }
 }
 
-function findRouter(options) {
+function findRouterPath(options) {
   let routerPathParts = [options.project.root];
-  let root = isModuleUnificationProject(options.project) ? 'src' : 'app';
 
   if (options.dummy && options.project.isEmberCLIAddon()) {
-    routerPathParts = routerPathParts.concat(['tests', 'dummy', root, 'router.js']);
+    routerPathParts.push('tests', 'dummy', 'app');
   } else {
-    routerPathParts = routerPathParts.concat([root, 'router.js']);
+    routerPathParts.push('app');
   }
 
-  return routerPathParts;
+  let jsRouterPath = path.join(...routerPathParts, 'router.js');
+  let tsRouterPath = path.join(...routerPathParts, 'router.ts');
+
+  let jsRouterPathExists = fs.existsSync(jsRouterPath);
+  let tsRouterPathExists = fs.existsSync(tsRouterPath);
+
+  if (jsRouterPathExists && tsRouterPathExists) {
+    throw new SilentError(
+      'Found both a `router.js` and `router.ts` file. Please make sure your project only has one or the other.'
+    );
+  }
+
+  if (jsRouterPathExists) {
+    return jsRouterPath;
+  }
+
+  if (tsRouterPathExists) {
+    return tsRouterPath;
+  }
+
+  throw new SilentError(
+    'Could not find a router file. Please make sure your project has a `router.js` or `router.ts` file.'
+  );
 }
 
 function writeRoute(action, name, options) {
-  let routerPath = path.join.apply(null, findRouter(options));
+  let routerPath = findRouterPath(options);
   let source = fs.readFileSync(routerPath, 'utf-8');
 
   let routes = new EmberRouterGenerator(source);

@@ -1,14 +1,14 @@
 import Controller from '@ember/controller';
-import { Route } from '@ember/-internals/routing';
-import { Mixin } from '@ember/-internals/metal';
+import Route from '@ember/routing/route';
+import Mixin from '@ember/object/mixin';
 import { QueryParamTestCase, moduleFor, runLoopSettled } from 'internal-test-helpers';
 
 moduleFor(
   'Query Params - overlapping query param property names',
   class extends QueryParamTestCase {
     setupBase() {
-      this.router.map(function() {
-        this.route('parent', function() {
+      this.router.map(function () {
+        this.route('parent', function () {
           this.route('child');
         });
       });

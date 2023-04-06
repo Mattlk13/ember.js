@@ -1,11 +1,12 @@
 import { moduleFor, AutobootApplicationTestCase, runTask } from 'internal-test-helpers';
 import Application from '@ember/application';
-import { Route, Router } from '@ember/-internals/routing';
+import Route from '@ember/routing/route';
+import Router from '@ember/routing/router';
 import { Component } from '@ember/-internals/glimmer';
 import { getDebugFunction, setDebugFunction } from '@ember/debug';
 
 const originalDebug = getDebugFunction('debug');
-const noop = function() {};
+const noop = function () {};
 
 moduleFor(
   'Application Lifecycle - route hooks',

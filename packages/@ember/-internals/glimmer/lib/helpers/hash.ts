@@ -1,7 +1,3 @@
-import { PathReference } from '@glimmer/reference';
-import { Arguments, VM } from '@glimmer/runtime';
-import { Dict, Opaque } from '@glimmer/util';
-
 /**
 @module ember
 */
@@ -38,13 +34,9 @@ import { Dict, Opaque } from '@glimmer/util';
    ```
 
    @method hash
-   @for Ember.Templates.helpers
+   @for @ember/helper
    @param {Object} options
    @return {Object} Hash
    @since 2.3.0
    @public
  */
-
-export default function(_vm: VM, args: Arguments): PathReference<Dict<Opaque>> {
-  return args.named.capture();
-}

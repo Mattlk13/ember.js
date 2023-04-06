@@ -1,5 +1,5 @@
 import { AbstractTestCase, runLoopSettled } from 'internal-test-helpers';
-import { get } from '@ember/-internals/metal';
+import { get } from '@ember/object';
 import { runArrayTests, newFixture } from '../helpers/array';
 
 class UnshiftObjectTests extends AbstractTestCase {
@@ -40,6 +40,8 @@ class UnshiftObjectTests extends AbstractTestCase {
       1,
       'should have notified lastObject once'
     );
+
+    obj.destroy();
   }
 
   async '@test [A,B,C].unshiftObject(X) => [X,A,B,C] + notify'() {
@@ -73,6 +75,8 @@ class UnshiftObjectTests extends AbstractTestCase {
       false,
       'should NOT have notified lastObject'
     );
+
+    obj.destroy();
   }
 
   async '@test [A,B,C].unshiftObject(A) => [A,A,B,C] + notify'() {
@@ -102,6 +106,8 @@ class UnshiftObjectTests extends AbstractTestCase {
       false,
       'should NOT have notified lastObject'
     );
+
+    obj.destroy();
   }
 }
 

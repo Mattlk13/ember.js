@@ -1,34 +1,28 @@
-import { Owner } from '@ember/-internals/owner';
-import { Option } from '@glimmer/interfaces';
+import type { InternalOwner } from '@ember/-internals/owner';
+import type { ComponentManager } from '@glimmer/interfaces';
+import {
+  componentCapabilities as glimmerComponentCapabilities,
+  modifierCapabilities as glimmerModifierCapabilities,
+  setComponentManager as glimmerSetComponentManager,
+} from '@glimmer/manager';
 
-const MANAGERS: WeakMap<object, ManagerWrapper<unknown>> = new WeakMap();
+/**
+   Associate a class with a component manager (an object that is responsible for
+   coordinating the lifecycle events that occurs when invoking, rendering and
+   re-rendering a component).
 
-const getPrototypeOf = Object.getPrototypeOf;
-
-export type ManagerFactory<ManagerDelegate> = (owner: Owner) => ManagerDelegate;
-
-export interface ManagerWrapper<ManagerDelegate> {
-  factory: ManagerFactory<ManagerDelegate>;
-  internal: boolean;
-  type: 'component' | 'modifier';
+   @method setComponentManager
+   @param {Function} factory a function to create the owner for an object
+   @param {Object} obj the object to associate with the componetn manager
+   @return {Object} the same object passed in
+   @public
+  */
+export function setComponentManager<T extends object>(
+  manager: (owner: InternalOwner) => ComponentManager<unknown>,
+  obj: T
+): T {
+  return glimmerSetComponentManager(manager, obj);
 }
 
-export function setManager<ManagerDelegate>(wrapper: ManagerWrapper<ManagerDelegate>, obj: object) {
-  MANAGERS.set(obj, wrapper);
-  return obj;
-}
-
-export function getManager<ManagerDelegate>(obj: object): Option<ManagerWrapper<ManagerDelegate>> {
-  let pointer = obj;
-  while (pointer !== undefined && pointer !== null) {
-    let manager = MANAGERS.get(pointer);
-
-    if (manager !== undefined) {
-      return manager as ManagerWrapper<ManagerDelegate>;
-    }
-
-    pointer = getPrototypeOf(pointer);
-  }
-
-  return null;
-}
+export let componentCapabilities = glimmerComponentCapabilities;
+export let modifierCapabilities = glimmerModifierCapabilities;

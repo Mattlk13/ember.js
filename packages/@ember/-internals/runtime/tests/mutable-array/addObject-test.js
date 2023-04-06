@@ -1,4 +1,4 @@
-import { get } from '@ember/-internals/metal';
+import { get } from '@ember/object';
 import { AbstractTestCase, runLoopSettled } from 'internal-test-helpers';
 import { runArrayTests, newFixture } from '../helpers/array';
 
@@ -42,6 +42,8 @@ class AddObjectTest extends AbstractTestCase {
         'should NOT have notified firstObject once'
       );
     }
+
+    obj.destroy();
   }
 
   async '@test [A,B,C].addObject(A) => [A,B,C] + NO notify'() {
@@ -76,6 +78,8 @@ class AddObjectTest extends AbstractTestCase {
         'should NOT have notified lastObject once'
       );
     }
+
+    obj.destroy();
   }
 }
 

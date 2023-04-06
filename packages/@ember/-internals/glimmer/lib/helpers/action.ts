@@ -2,14 +2,18 @@
 @module ember
 */
 import { get } from '@ember/-internals/metal';
+import type { AnyFn } from '@ember/-internals/utility-types';
 import { assert } from '@ember/debug';
 import { flaggedInstrument } from '@ember/instrumentation';
 import { join } from '@ember/runloop';
 import { DEBUG } from '@glimmer/env';
-import { isConst, VersionedPathReference } from '@glimmer/reference';
-import { Arguments, VM } from '@glimmer/runtime';
-import { Opaque } from '@glimmer/util';
-import { ACTION, INVOKE, UnboundReference } from '../utils/references';
+import type { CapturedArguments } from '@glimmer/interfaces';
+import type { Reference } from '@glimmer/reference';
+import { createUnboundRef, isInvokableRef, updateRef, valueForRef } from '@glimmer/reference';
+import { _WeakSet } from '@glimmer/util';
+import { internalHelper } from './internal-helper';
+
+export const ACTIONS = new _WeakSet();
 
 /**
   The `{{action}}` helper provides a way to pass triggers for behavior (usually
@@ -87,10 +91,10 @@ import { ACTION, INVOKE, UnboundReference } from '../utils/references';
 
   Closure actions curry both their scope and any arguments. When invoked, any
   additional arguments are added to the already curried list.
-  Actions should be invoked using the [sendAction](/ember/release/classes/Component/methods/sendAction?anchor=sendAction)
-  method. The first argument to `sendAction` is the action to be called, and
-  additional arguments are passed to the action function. This has interesting
-  properties combined with currying of arguments. For example:
+  Actions are presented in JavaScript as callbacks, and are
+  invoked like any other JavaScript function.
+
+  For example
 
   ```app/components/update-name.js
   import Component from '@glimmer/component';
@@ -144,7 +148,7 @@ import { ACTION, INVOKE, UnboundReference } from '../utils/references';
   export default Component.extend({
     click() {
       // Note that model is not passed, it was curried in the template
-      this.sendAction('submit', 'bob');
+      this.submit('bob');
     }
   });
   ```
@@ -263,7 +267,7 @@ import { ACTION, INVOKE, UnboundReference } from '../utils/references';
 
   ```app/controllers/application.js
   import Controller from '@ember/controller';
-  import { inject as service } from '@ember/service';
+  import { service } from '@ember/service';
 
   export default class extends Controller {
     @service someService;
@@ -274,62 +278,60 @@ import { ACTION, INVOKE, UnboundReference } from '../utils/references';
   @for Ember.Templates.helpers
   @public
 */
-export default function(_vm: VM, args: Arguments): UnboundReference<Function> {
+export default internalHelper((args: CapturedArguments): Reference<Function> => {
   let { named, positional } = args;
-
-  let capturedArgs = positional.capture();
-
   // The first two argument slots are reserved.
   // pos[0] is the context (or `this`)
   // pos[1] is the action name or function
   // Anything else is an action argument.
-  let [context, action, ...restArgs] = capturedArgs.references;
+  let [context, action, ...restArgs] = positional;
+  assert('hash position arguments', context && action);
 
-  // TODO: Is there a better way of doing this?
-  let debugKey: string | undefined = (action as any).propertyKey;
+  let debugKey: string = action.debugLabel!;
 
-  let target = named.has('target') ? named.get('target') : context;
-  let processArgs = makeArgsProcessor(named.has('value') && named.get('value'), restArgs);
+  let target = 'target' in named ? named['target'] : context;
+  let processArgs = makeArgsProcessor(('value' in named && named['value']) || false, restArgs);
 
   let fn: Function;
 
-  if (typeof action[INVOKE] === 'function') {
-    fn = makeClosureAction(action, action, action[INVOKE], processArgs, debugKey);
-  } else if (isConst(target) && isConst(action)) {
-    fn = makeClosureAction(context.value(), target.value(), action.value(), processArgs, debugKey);
+  if (isInvokableRef(action)) {
+    fn = makeClosureAction(action, action as MaybeActionHandler, invokeRef, processArgs, debugKey);
   } else {
-    fn = makeDynamicClosureAction(context.value(), target, action, processArgs, debugKey);
+    fn = makeDynamicClosureAction(
+      valueForRef(context) as object,
+      target!,
+      action,
+      processArgs,
+      debugKey
+    );
   }
 
-  fn[ACTION] = true;
+  ACTIONS.add(fn);
 
-  return new UnboundReference(fn);
-}
+  return createUnboundRef(fn, '(result of an `action` helper)');
+});
 
-function NOOP(args: Arguments) {
+function NOOP(args: unknown[]) {
   return args;
 }
 
-function makeArgsProcessor(
-  valuePathRef: VersionedPathReference<Opaque> | false,
-  actionArgsRef: Array<VersionedPathReference<Opaque>>
-) {
-  let mergeArgs: any;
+function makeArgsProcessor(valuePathRef: Reference | false, actionArgsRef: Reference[]) {
+  let mergeArgs: ((args: unknown[]) => unknown[]) | undefined;
 
   if (actionArgsRef.length > 0) {
-    mergeArgs = (args: Arguments) => {
-      return actionArgsRef.map(ref => ref.value()).concat(args);
+    mergeArgs = (args: unknown[]) => {
+      return actionArgsRef.map(valueForRef).concat(args);
     };
   }
 
-  let readValue: any;
+  let readValue: ((args: unknown[]) => unknown[]) | undefined;
 
   if (valuePathRef) {
-    readValue = (args: any) => {
-      let valuePath = valuePathRef.value();
+    readValue = (args: unknown[]) => {
+      let valuePath = valueForRef(valuePathRef);
 
       if (valuePath && args.length > 0) {
-        args[0] = get(args[0], valuePath as string);
+        args[0] = get(args[0] as object, valuePath as string);
       }
 
       return args;
@@ -337,8 +339,8 @@ function makeArgsProcessor(
   }
 
   if (mergeArgs && readValue) {
-    return (args: Arguments) => {
-      return readValue(mergeArgs(args));
+    return (args: unknown[]) => {
+      return readValue!(mergeArgs!(args));
     };
   } else {
     return mergeArgs || readValue || NOOP;
@@ -346,62 +348,70 @@ function makeArgsProcessor(
 }
 
 function makeDynamicClosureAction(
-  context: any,
-  targetRef: any,
-  actionRef: any,
-  processArgs: any,
-  debugKey: any
+  context: object,
+  targetRef: Reference<MaybeActionHandler>,
+  actionRef: Reference<string | AnyFn>,
+  processArgs: (args: unknown[]) => unknown[],
+  debugKey: string
 ) {
   // We don't allow undefined/null values, so this creates a throw-away action to trigger the assertions
   if (DEBUG) {
-    makeClosureAction(context, targetRef.value(), actionRef.value(), processArgs, debugKey);
+    makeClosureAction(
+      context,
+      valueForRef(targetRef),
+      valueForRef(actionRef),
+      processArgs,
+      debugKey
+    );
   }
 
   return (...args: any[]) => {
-    return makeClosureAction(context, targetRef.value(), actionRef.value(), processArgs, debugKey)(
-      ...args
-    );
+    return makeClosureAction(
+      context,
+      valueForRef(targetRef),
+      valueForRef(actionRef),
+      processArgs,
+      debugKey
+    )(...args);
   };
 }
 
+interface MaybeActionHandler {
+  actions?: Record<string, AnyFn>;
+}
+
 function makeClosureAction(
-  context: any,
-  target: any,
-  action: any,
-  processArgs: any,
-  debugKey: any
+  context: object,
+  target: MaybeActionHandler,
+  action: string | AnyFn,
+  processArgs: (args: unknown[]) => unknown[],
+  debugKey: string
 ) {
-  let self: any;
-  let fn: any;
+  let self: object;
+  let fn: AnyFn;
 
   assert(
     `Action passed is null or undefined in (action) from ${target}.`,
     action !== undefined && action !== null
   );
 
-  if (typeof action[INVOKE] === 'function') {
-    self = action;
-    fn = action[INVOKE];
+  if (typeof action === 'string') {
+    self = target;
+    fn = (target.actions && target.actions[action as string])!;
+
+    assert(`An action named '${action}' was not found in ${target}`, Boolean(fn));
+  } else if (typeof action === 'function') {
+    self = context;
+    fn = action;
   } else {
-    let typeofAction = typeof action;
-
-    if (typeofAction === 'string') {
-      self = target;
-      fn = target.actions && target.actions[action];
-
-      assert(`An action named '${action}' was not found in ${target}`, fn);
-    } else if (typeofAction === 'function') {
-      self = context;
-      fn = action;
-    } else {
-      // tslint:disable-next-line:max-line-length
-      assert(
-        `An action could not be made for \`${debugKey ||
-          action}\` in ${target}. Please confirm that you are using either a quoted action name (i.e. \`(action '${debugKey ||
-          'myAction'}')\`) or a function available in ${target}.`,
-        false
-      );
-    }
+    assert(
+      `An action could not be made for \`${
+        debugKey || action
+      }\` in ${target}. Please confirm that you are using either a quoted action name (i.e. \`(action '${
+        debugKey || 'myAction'
+      }')\`) or a function available in ${target}.`,
+      false
+    );
   }
 
   return (...args: any[]) => {
@@ -410,4 +420,17 @@ function makeClosureAction(
       return join(self, fn, ...processArgs(args));
     });
   };
+}
+
+// The code above:
+
+// 1. Finds an action function, usually on the `actions` hash
+// 2. Calls it with the target as the correct `this` context
+
+// Previously, `UPDATE_REFERENCED_VALUE` was a method on the reference itself,
+// so this made a bit more sense. Now, it isn't, and so we need to create a
+// function that can have `this` bound to it when called. This allows us to use
+// the same codepath to call `updateRef` on the reference.
+function invokeRef(this: Reference, value: unknown) {
+  updateRef(this, value);
 }

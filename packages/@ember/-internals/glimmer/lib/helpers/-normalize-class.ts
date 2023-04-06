@@ -1,24 +1,26 @@
-import { dasherize } from '@ember/string';
-import { Arguments, VM } from '@glimmer/runtime';
-import { InternalHelperReference } from '../utils/references';
+import { assert } from '@ember/debug';
+import { dasherize } from '@ember/-internals/string';
+import type { CapturedArguments } from '@glimmer/interfaces';
+import { createComputeRef, valueForRef } from '@glimmer/reference';
+import { internalHelper } from './internal-helper';
 
-function normalizeClass({ positional }: any) {
-  let classNameParts = positional
-    .at(0)
-    .value()
-    .split('.');
-  let className = classNameParts[classNameParts.length - 1];
-  let value = positional.at(1).value();
+export default internalHelper(({ positional }: CapturedArguments) => {
+  return createComputeRef(() => {
+    let classNameArg = positional[0];
+    let valueArg = positional[1];
+    assert('expected at least two positional args', classNameArg && valueArg);
 
-  if (value === true) {
-    return dasherize(className);
-  } else if (!value && value !== 0) {
-    return '';
-  } else {
-    return String(value);
-  }
-}
+    let classNameParts = (valueForRef(classNameArg) as string).split('.');
+    let className = classNameParts[classNameParts.length - 1];
+    assert('has className', className); // Always at least one split result
+    let value = valueForRef(valueArg);
 
-export default function(_vm: VM, args: Arguments) {
-  return new InternalHelperReference(normalizeClass, args.capture());
-}
+    if (value === true) {
+      return dasherize(className);
+    } else if (!value && value !== 0) {
+      return '';
+    } else {
+      return String(value);
+    }
+  });
+});

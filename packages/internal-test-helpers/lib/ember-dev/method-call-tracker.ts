@@ -1,5 +1,7 @@
 import { DEBUG } from '@glimmer/env';
-import { checkTest, DebugEnv, DebugFunction, DebugFunctionOptions } from './utils';
+import { assert as emberAssert } from '@ember/debug';
+import type { DebugEnv, DebugFunction, DebugFunctionOptions } from './utils';
+import { checkTest } from './utils';
 
 type Actual = [string, boolean, DebugFunctionOptions];
 type Message = string | RegExp;
@@ -24,7 +26,7 @@ export default class MethodCallTracker {
     this._originalMethod = undefined;
   }
 
-  stubMethod() {
+  stubMethod(): void {
     if (this._originalMethod) {
       // Method is already stubbed
       return;
@@ -42,39 +44,39 @@ export default class MethodCallTracker {
     });
   }
 
-  restoreMethod() {
+  restoreMethod(): void {
     if (this._originalMethod) {
       this._env.setDebugFunction(this._methodName, this._originalMethod);
     }
   }
 
-  expectCall(message: Message, options?: OptionList) {
+  expectCall(message?: Message, options?: OptionList): void {
     this.stubMethod();
     this._expectedMessages.push(message || /.*/);
     this._expectedOptionLists.push(options);
   }
 
-  expectNoCalls() {
+  expectNoCalls(): void {
     this.stubMethod();
     this._isExpectingNoCalls = true;
   }
 
-  isExpectingNoCalls() {
+  isExpectingNoCalls(): boolean {
     return this._isExpectingNoCalls;
   }
 
-  isExpectingCalls() {
+  isExpectingCalls(): boolean | number {
     return !this._isExpectingNoCalls && this._expectedMessages.length;
   }
 
-  assert() {
+  assert(): void {
     let { assert } = QUnit.config.current;
     let methodName = this._methodName;
     let isExpectingNoCalls = this._isExpectingNoCalls;
     let expectedMessages = this._expectedMessages;
     let expectedOptionLists = this._expectedOptionLists;
     let actuals = this._actuals;
-    let o, i, j;
+    let o, i;
 
     if (!isExpectingNoCalls && expectedMessages.length === 0 && actuals.length === 0) {
       return;
@@ -87,9 +89,9 @@ export default class MethodCallTracker {
 
     if (isExpectingNoCalls) {
       let actualMessages = [];
-      for (i = 0; i < actuals.length; i++) {
-        if (!actuals[i][1]) {
-          actualMessages.push(actuals[i][0]);
+      for (let actual in actuals) {
+        if (!actual[1]) {
+          actualMessages.push(actual[0]);
         }
       }
       assert.ok(
@@ -101,6 +103,7 @@ export default class MethodCallTracker {
 
     let actual: Actual | undefined;
     let match: Actual | undefined = undefined;
+    let matched: Set<number> = new Set();
 
     for (o = 0; o < expectedMessages.length; o++) {
       const expectedMessage = expectedMessages[o];
@@ -110,6 +113,7 @@ export default class MethodCallTracker {
         let matchesMessage = false;
         let matchesOptionList = false;
         actual = actuals[i];
+        emberAssert('has actual', actual); // We just checked the array
 
         if (actual[1] === true) {
           continue;
@@ -126,15 +130,16 @@ export default class MethodCallTracker {
         } else if (actual[2]) {
           matchesOptionList = true;
 
-          for (j = 0; j < expectedOptionList.length; j++) {
+          for (let expectedOption of expectedOptionList) {
             matchesOptionList =
-              matchesOptionList && actual[2].hasOwnProperty(expectedOptionList[j]);
+              matchesOptionList && Object.prototype.hasOwnProperty.call(actual[2], expectedOption);
           }
         }
 
         if (matchesMessage && matchesOptionList) {
           match = actual;
-          break;
+          matched.add(i);
+          continue;
         }
       }
 
@@ -168,6 +173,12 @@ export default class MethodCallTracker {
           false,
           `Did not receive failing Ember.${methodName} call matching '${expectedMessage}' ${expectedOptionsMessage}, last was failure with '${actual[0]}' ${actualOptionsMessage}`
         );
+      }
+    }
+
+    for (i = 0; i < actuals.length; i++) {
+      if (!matched.has(i) && actuals[i]![1] !== true) {
+        assert.ok(false, `Unexpected Ember.${methodName} call: ${actuals[i]![0]}`);
       }
     }
   }

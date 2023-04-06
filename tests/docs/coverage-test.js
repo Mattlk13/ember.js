@@ -1,11 +1,10 @@
-/* eslint-disable no-console */
 'use strict';
 
 const path = require('path');
 
-QUnit.module('Docs coverage', function(hooks) {
+QUnit.module('Docs coverage', function (hooks) {
   let docs, expected;
-  hooks.before(function() {
+  hooks.before(function () {
     if (!process.env.REUSE_DOCS) {
       buildDocs();
     }
@@ -13,14 +12,14 @@ QUnit.module('Docs coverage', function(hooks) {
     expected = require('./expected');
   });
 
-  QUnit.module('classitems', function(hooks) {
+  QUnit.module('classitems', function (hooks) {
     let docsItems, expectedItems;
-    hooks.before(function() {
-      docsItems = new Set(docs.classitems.map(item => item.name).filter(Boolean));
+    hooks.before(function () {
+      docsItems = new Set(docs.classitems.map((item) => item.name).filter(Boolean));
       expectedItems = new Set(expected.classitems);
     });
 
-    QUnit.test('No missing classitems', function(assert) {
+    QUnit.test('No missing classitems', function (assert) {
       let missing = setDifference(expectedItems, docsItems);
       assert.emptySet(
         missing,
@@ -28,7 +27,7 @@ QUnit.module('Docs coverage', function(hooks) {
       );
     });
 
-    QUnit.test('No extraneous classitems', function(assert) {
+    QUnit.test('No extraneous classitems', function (assert) {
       let extraneous = setDifference(docsItems, expectedItems);
       assert.emptySet(
         extraneous,

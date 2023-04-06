@@ -1,6 +1,6 @@
 import { moduleFor, RenderingTestCase, runTask } from 'internal-test-helpers';
 
-import { set } from '@ember/-internals/metal';
+import { set } from '@ember/object';
 
 moduleFor(
   'Components test: web component fallback',
@@ -16,7 +16,7 @@ moduleFor(
     }
 
     ['@test custom elements can have bound attributes']() {
-      let template = `<foo-bar some-attr="{{name}}">hello</foo-bar>`;
+      let template = `<foo-bar some-attr="{{this.name}}">hello</foo-bar>`;
 
       this.render(template, { name: 'Robert' });
 

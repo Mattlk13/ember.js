@@ -5,12 +5,21 @@ const path = require('path');
 const pathUtil = require('ember-cli-path-utils');
 const stringUtils = require('ember-cli-string-utils');
 
+const maybePolyfillTypeScriptBlueprints = require('../-maybe-polyfill-typescript-blueprints');
+const { modulePrefixForProject } = require('../-utils');
 const useTestFrameworkDetector = require('../test-framework-detector');
 
 module.exports = useTestFrameworkDetector({
   description: 'Generates an acceptance test for a feature.',
 
-  locals: function(options) {
+  shouldTransformTypeScript: true,
+
+  init() {
+    this._super && this._super.init.apply(this, arguments);
+    maybePolyfillTypeScriptBlueprints(this);
+  },
+
+  locals: function (options) {
     let testFolderRoot = stringUtils.dasherize(options.project.name());
 
     if (options.project.isEmberCLIAddon()) {
@@ -27,7 +36,8 @@ module.exports = useTestFrameworkDetector({
     ].join(' | ');
 
     return {
-      testFolderRoot: testFolderRoot,
+      modulePrefix: modulePrefixForProject(options.project),
+      testFolderRoot,
       friendlyTestName,
       destroyAppExists,
     };

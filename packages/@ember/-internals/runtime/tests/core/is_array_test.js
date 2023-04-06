@@ -1,6 +1,6 @@
-import { A as emberA, isArray } from '../../lib/mixins/array';
-import ArrayProxy from '../../lib/system/array_proxy';
-import EmberObject from '../../lib/system/object';
+import { A as emberA, isArray } from '@ember/array';
+import ArrayProxy from '@ember/array/proxy';
+import EmberObject from '@ember/object';
 import { window } from '@ember/-internals/browser-environment';
 import { moduleFor, AbstractTestCase } from 'internal-test-helpers';
 
@@ -17,7 +17,8 @@ moduleFor(
       let object = {};
       let length = { length: 12 };
       let strangeLength = { length: 'yes' };
-      let fn = function() {};
+      let fn = function () {};
+      let asyncFn = async function () {};
       let arrayProxy = ArrayProxy.create({ content: emberA() });
 
       assert.equal(isArray(numarray), true, '[1,2,3]');
@@ -29,6 +30,7 @@ moduleFor(
       assert.equal(isArray(strangeLength), false, '{ length: "yes" }');
       assert.equal(isArray(global), false, 'global');
       assert.equal(isArray(fn), false, 'function() {}');
+      assert.equal(isArray(asyncFn), false, 'async function() {}');
       assert.equal(isArray(arrayProxy), true, '[]');
     }
 

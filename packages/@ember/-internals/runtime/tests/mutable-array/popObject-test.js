@@ -1,4 +1,4 @@
-import { get } from '@ember/-internals/metal';
+import { get } from '@ember/object';
 import { AbstractTestCase, runLoopSettled } from 'internal-test-helpers';
 import { runArrayTests, newFixture } from '../helpers/array';
 
@@ -29,6 +29,8 @@ class PopObjectTests extends AbstractTestCase {
       false,
       'should NOT have notified lastObject'
     );
+
+    obj.destroy();
   }
 
   async '@test [X].popObject() => [] + notify'() {
@@ -61,6 +63,8 @@ class PopObjectTests extends AbstractTestCase {
       1,
       'should have notified lastObject once'
     );
+
+    obj.destroy();
   }
 
   async '@test [A,B,C].popObject() => [A,B] + notify'() {
@@ -94,6 +98,8 @@ class PopObjectTests extends AbstractTestCase {
       false,
       'should NOT have notified firstObject'
     );
+
+    obj.destroy();
   }
 }
 

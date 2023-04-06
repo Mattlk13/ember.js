@@ -1,9 +1,73 @@
 import Controller, { inject as injectController } from '@ember/controller';
-import Service, { inject as injectService } from '@ember/service';
-import { Object as EmberObject } from '@ember/-internals/runtime';
-import { Mixin, get } from '@ember/-internals/metal';
+import Service, { service } from '@ember/service';
+import EmberObject, { get } from '@ember/object';
+import Mixin from '@ember/object/mixin';
+import { setOwner } from '@ember/-internals/owner';
 import { runDestroy, buildOwner } from 'internal-test-helpers';
-import { moduleFor, AbstractTestCase } from 'internal-test-helpers';
+import { moduleFor, ApplicationTestCase, AbstractTestCase, runTask } from 'internal-test-helpers';
+import { action } from '@ember/object';
+
+moduleFor(
+  'Controller model',
+  class extends ApplicationTestCase {
+    async '@test model is tracked'() {
+      this.add(
+        'controller:index',
+        class extends Controller {
+          constructor() {
+            super(...arguments);
+            this.model = 0;
+          }
+
+          get derived() {
+            return this.model + 1;
+          }
+
+          @action
+          update() {
+            this.model++;
+          }
+        }
+      );
+
+      this.addTemplate('index', '<button {{on "click" this.update}}>{{this.derived}}</button>');
+
+      await this.visit('/');
+
+      this.assertText('1');
+
+      runTask(() => this.$('button').click());
+      this.assertText('2');
+    }
+
+    async '@test model can be observed with sync observers'(assert) {
+      let observerRunCount = 0;
+
+      this.add(
+        'controller:index',
+        class extends Controller {
+          constructor() {
+            super(...arguments);
+            this.model = 0;
+
+            this.addObserver('model', this, () => observerRunCount++, true);
+          }
+
+          @action
+          update() {
+            this.model++;
+          }
+        }
+      );
+
+      this.addTemplate('index', '<button {{on "click" this.update}}>{{this.model}}</button>');
+
+      await this.visit('/');
+      runTask(() => this.$('button').click());
+      assert.equal(observerRunCount, 1, 'observer ran exactly once');
+    }
+  }
+);
 
 moduleFor(
   'Controller event handling',
@@ -23,6 +87,8 @@ moduleFor(
 
     ['@test A handled action can be bubbled to the target for continued processing'](assert) {
       assert.expect(2);
+      let owner = buildOwner();
+
       let TestController = Controller.extend({
         actions: {
           poke() {
@@ -31,6 +97,8 @@ moduleFor(
           },
         },
       });
+
+      owner.register('controller:index', TestController);
 
       let controller = TestController.create({
         target: Controller.extend({
@@ -41,7 +109,12 @@ moduleFor(
           },
         }).create(),
       });
+
+      setOwner(controller, owner);
+
       controller.send('poke');
+
+      runDestroy(owner);
     }
 
     ["@test Action can be handled by a superclass' actions object"](assert) {
@@ -110,7 +183,7 @@ moduleFor(
       assert.expect(2);
       let controller;
 
-      ignoreDeprecation(function() {
+      ignoreDeprecation(function () {
         controller = Controller.extend({
           content: 'foo-bar',
         }).create();
@@ -152,9 +225,9 @@ moduleFor(
   'Controller deprecations -> Controller injected properties',
   class extends AbstractTestCase {
     ['@test defining a controller on a non-controller should fail assertion']() {
-      expectAssertion(function() {
-        let owner = buildOwner();
+      let owner = buildOwner();
 
+      expectAssertion(function () {
         let AnObject = EmberObject.extend({
           foo: injectController('bar'),
         });
@@ -164,6 +237,8 @@ moduleFor(
 
         owner.lookup('foo:main');
       }, /Defining `foo` as an injected controller property on a non-controller \(`foo:main`\) is not allowed/);
+
+      runDestroy(owner);
     }
 
     ['@test controllers can be injected into controllers'](assert) {
@@ -186,6 +261,8 @@ moduleFor(
         postController.get('postsController'),
         'controller.posts is injected'
       );
+
+      runDestroy(owner);
     }
 
     ['@test services can be injected into controllers'](assert) {
@@ -194,7 +271,7 @@ moduleFor(
       owner.register(
         'controller:application',
         Controller.extend({
-          authService: injectService('auth'),
+          authService: service('auth'),
         })
       );
 
@@ -204,6 +281,8 @@ moduleFor(
       let authService = owner.lookup('service:auth');
 
       assert.equal(authService, appController.get('authService'), 'service.auth is injected');
+
+      runDestroy(owner);
     }
   }
 );
@@ -226,6 +305,8 @@ moduleFor(
       let index = owner.lookup('controller:index');
 
       assert.ok(index.main instanceof Controller, 'controller injected correctly');
+
+      runDestroy(owner);
     }
 
     ['@test uses the decorated property key if not provided'](assert) {
@@ -243,6 +324,8 @@ moduleFor(
       let index = owner.lookup('controller:index');
 
       assert.ok(index.main instanceof Controller, 'controller injected correctly');
+
+      runDestroy(owner);
     }
   }
 );

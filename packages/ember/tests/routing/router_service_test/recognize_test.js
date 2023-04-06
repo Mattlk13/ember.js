@@ -1,5 +1,5 @@
 import { RouterTestCase, moduleFor } from 'internal-test-helpers';
-import { Route } from '@ember/-internals/routing';
+import Route from '@ember/routing/route';
 
 moduleFor(
   'Router Service - recognize',
@@ -95,17 +95,10 @@ moduleFor(
         .then(() => {
           return this.routerService.recognizeAndLoad('/dynamic-with-child/123/1?a=b');
         })
-        .then(routeInfoWithAttributes => {
+        .then((routeInfoWithAttributes) => {
           assert.ok(routeInfoWithAttributes);
-          let {
-            name,
-            localName,
-            parent,
-            attributes,
-            paramNames,
-            params,
-            queryParams,
-          } = routeInfoWithAttributes;
+          let { name, localName, parent, attributes, paramNames, params, queryParams } =
+            routeInfoWithAttributes;
           assert.equal(name, 'dynamicWithChild.child');
           assert.equal(localName, 'child');
           assert.equal(parent.name, 'dynamicWithChild');
@@ -152,7 +145,7 @@ moduleFor(
         .then(() => {
           return this.routerService.recognizeAndLoad('/app/child/');
         })
-        .then(routeInfoWithAttributes => {
+        .then((routeInfoWithAttributes) => {
           assert.ok(routeInfoWithAttributes);
           let { name, localName, parent } = routeInfoWithAttributes;
           assert.equal(name, 'parent.child');
@@ -193,7 +186,7 @@ moduleFor(
           () => {
             assert.ok(false, 'never');
           },
-          reason => {
+          (reason) => {
             assert.equal(reason, 'URL /foo was not recognized');
           }
         );
@@ -219,7 +212,7 @@ moduleFor(
           () => {
             assert.ok(false, 'never');
           },
-          err => {
+          (err) => {
             assert.equal(err.message, 'Unhandled');
           }
         );

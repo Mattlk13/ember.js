@@ -1,24 +1,23 @@
 /**
 @module @ember/object
 */
-import { HAS_NATIVE_PROXY, isEmberArray, symbol } from '@ember/-internals/utils';
-import { EMBER_METAL_TRACKED_PROPERTIES } from '@ember/canary-features';
+import type ProxyMixin from '@ember/-internals/runtime/lib/mixins/-proxy';
+import { setProxy, symbol } from '@ember/-internals/utils';
+import { isEmberArray } from '@ember/array/-internals';
 import { assert } from '@ember/debug';
 import { DEBUG } from '@glimmer/env';
-import { descriptorForProperty } from './descriptor_map';
+import { consumeTag, isTracking, tagFor, track } from '@glimmer/validator';
 import { isPath } from './path_cache';
-import { tagForProperty } from './tags';
-import { consume, isTracking } from './tracked';
 
 export const PROXY_CONTENT = symbol('PROXY_CONTENT');
 
 export let getPossibleMandatoryProxyValue: (obj: object, keyName: string) => any;
 
-if (DEBUG && HAS_NATIVE_PROXY) {
+if (DEBUG) {
   getPossibleMandatoryProxyValue = function getPossibleMandatoryProxyValue(obj, keyName): any {
-    let content = obj[PROXY_CONTENT];
+    let content = (obj as any)[PROXY_CONTENT];
     if (content === undefined) {
-      return obj[keyName];
+      return (obj as any)[keyName];
     } else {
       /* global Reflect */
       return Reflect.get(content, keyName, obj);
@@ -26,8 +25,16 @@ if (DEBUG && HAS_NATIVE_PROXY) {
   };
 }
 
-interface MaybeHasUnknownProperty {
-  unknownProperty?: (keyName: string) => any;
+export interface HasUnknownProperty {
+  unknownProperty: (keyName: string) => any;
+}
+
+export function hasUnknownProperty(val: unknown): val is HasUnknownProperty {
+  return (
+    typeof val === 'object' &&
+    val !== null &&
+    typeof (val as HasUnknownProperty).unknownProperty === 'function'
+  );
 }
 
 interface MaybeHasIsDestroyed {
@@ -72,7 +79,9 @@ interface MaybeHasIsDestroyed {
   @return {Object} the property value or `null`.
   @public
 */
-export function get(obj: object, keyName: string): any {
+export function get<T extends object, K extends keyof T>(obj: T, keyName: K): T[K];
+export function get(obj: unknown, keyName: string): unknown;
+export function get(obj: unknown, keyName: string): unknown {
   assert(
     `Get must be called with two arguments; an object and a property key`,
     arguments.length === 2
@@ -90,109 +99,84 @@ export function get(obj: object, keyName: string): any {
     typeof keyName !== 'string' || keyName.lastIndexOf('this.', 0) !== 0
   );
 
-  let type = typeof obj;
+  return isPath(keyName) ? _getPath(obj, keyName) : _getProp(obj, keyName);
+}
 
-  let isObject = type === 'object';
-  let isFunction = type === 'function';
-  let isObjectLike = isObject || isFunction;
-
-  if (isPath(keyName)) {
-    return isObjectLike ? _getPath(obj, keyName) : undefined;
+export function _getProp(obj: unknown, keyName: string) {
+  if (obj == null) {
+    return;
   }
 
-  let value: any;
+  let value: unknown;
 
-  if (isObjectLike) {
-    let tracking = isTracking();
-
-    if (EMBER_METAL_TRACKED_PROPERTIES) {
-      if (tracking) {
-        consume(tagForProperty(obj, keyName));
-      }
-    }
-
-    if (!EMBER_METAL_TRACKED_PROPERTIES) {
-      let descriptor = descriptorForProperty(obj, keyName);
-      if (descriptor !== undefined) {
-        return descriptor.get(obj, keyName);
-      }
-    }
-
-    if (DEBUG && HAS_NATIVE_PROXY) {
+  if (typeof obj === 'object' || typeof obj === 'function') {
+    if (DEBUG) {
       value = getPossibleMandatoryProxyValue(obj, keyName);
     } else {
-      value = obj[keyName];
+      value = (obj as any)[keyName];
     }
 
-    // Add the tag of the returned value if it is an array, since arrays
-    // should always cause updates if they are consumed and then changed
     if (
-      EMBER_METAL_TRACKED_PROPERTIES &&
-      tracking &&
-      (Array.isArray(value) || isEmberArray(value))
+      value === undefined &&
+      typeof obj === 'object' &&
+      !(keyName in obj) &&
+      hasUnknownProperty(obj)
     ) {
-      consume(tagForProperty(value, '[]'));
+      value = obj.unknownProperty(keyName);
+    }
+
+    if (isTracking()) {
+      consumeTag(tagFor(obj, keyName));
+
+      if (Array.isArray(value) || isEmberArray(value)) {
+        // Add the tag of the returned value if it is an array, since arrays
+        // should always cause updates if they are consumed and then changed
+        consumeTag(tagFor(value, '[]'));
+      }
     }
   } else {
-    value = obj[keyName];
+    // SAFETY: It should be ok to access properties on any non-nullish value
+    value = (obj as any)[keyName];
   }
 
-  if (value === undefined) {
-    if (
-      isObject &&
-      !(keyName in obj) &&
-      typeof (obj as MaybeHasUnknownProperty).unknownProperty === 'function'
-    ) {
-      return (obj as MaybeHasUnknownProperty).unknownProperty!(keyName);
-    }
-  }
   return value;
 }
 
-export function _getPath<T extends object>(root: T, path: string | string[]): any {
-  let obj: any = root;
+export function _getPath(obj: unknown, path: string | string[], forSet?: boolean): any {
   let parts = typeof path === 'string' ? path.split('.') : path;
 
-  for (let i = 0; i < parts.length; i++) {
+  for (let part of parts) {
     if (obj === undefined || obj === null || (obj as MaybeHasIsDestroyed).isDestroyed) {
       return undefined;
     }
 
-    obj = get(obj, parts[i]);
+    if (forSet && (part === '__proto__' || part === 'constructor')) {
+      return;
+    }
+
+    obj = _getProp(obj, part);
   }
 
   return obj;
 }
 
-/**
-  Retrieves the value of a property from an Object, or a default value in the
-  case that the property returns `undefined`.
-
-  ```javascript
-  import { getWithDefault } from '@ember/object';
-  getWithDefault(person, 'lastName', 'Doe');
-  ```
-
-  @method getWithDefault
-  @for @ember/object
-  @static
-  @param {Object} obj The object to retrieve from.
-  @param {String} keyName The name of the property to retrieve
-  @param {Object} defaultValue The value to return if the property value is undefined
-  @return {Object} The property value or the defaultValue.
-  @public
-*/
-export function getWithDefault<T extends object, K extends Extract<keyof T, string>>(
-  root: T,
-  key: K,
-  defaultValue: T[K]
-): T[K] {
-  let value = get(root, key);
-
-  if (value === undefined) {
-    return defaultValue;
-  }
-  return value;
-}
-
 export default get;
+
+// Warm it up
+_getProp('foo' as any, 'a');
+_getProp('foo' as any, 1 as any);
+_getProp({}, 'a');
+_getProp({}, 1 as any);
+_getProp({ unknownProperty() {} }, 'a');
+_getProp({ unknownProperty() {} }, 1 as any);
+
+get({}, 'foo');
+get({}, 'foo.bar');
+
+let fakeProxy = {} as ProxyMixin<unknown>;
+setProxy(fakeProxy);
+
+track(() => _getProp({}, 'a'));
+track(() => _getProp({}, 1 as any));
+track(() => _getProp({ a: [] }, 'a'));
+track(() => _getProp({ a: fakeProxy }, 'a'));

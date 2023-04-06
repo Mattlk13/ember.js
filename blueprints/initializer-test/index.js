@@ -2,49 +2,36 @@
 
 const fs = require('fs');
 const path = require('path');
-const stringUtils = require('ember-cli-string-utils');
 
+const maybePolyfillTypeScriptBlueprints = require('../-maybe-polyfill-typescript-blueprints');
+const { modulePrefixForProject } = require('../-utils');
 const useTestFrameworkDetector = require('../test-framework-detector');
-const isModuleUnificationProject = require('../module-unification').isModuleUnificationProject;
 
 module.exports = useTestFrameworkDetector({
   description: 'Generates an initializer unit test.',
 
-  fileMapTokens: function() {
-    if (isModuleUnificationProject(this.project)) {
-      return {
-        __root__(options) {
-          if (options.pod) {
-            throw new Error('Pods arenʼt supported within a module unification app');
-          } else if (options.inDummy) {
-            return path.join('tests', 'dummy', 'src', 'init');
-          }
-          return path.join('src', 'init');
-        },
-        __testType__() {
-          return '';
-        },
-      };
-    } else {
-      return {
-        __root__() {
-          return 'tests';
-        },
-        __testType__() {
-          return 'unit';
-        },
-      };
-    }
+  shouldTransformTypeScript: true,
+
+  init() {
+    this._super && this._super.init.apply(this, arguments);
+    maybePolyfillTypeScriptBlueprints(this);
   },
 
-  locals: function(options) {
-    let modulePrefix = stringUtils.dasherize(options.project.config().modulePrefix);
-    if (isModuleUnificationProject(this.project)) {
-      modulePrefix += '/init';
-    }
+  fileMapTokens: function () {
+    return {
+      __root__() {
+        return 'tests';
+      },
+      __testType__() {
+        return 'unit';
+      },
+    };
+  },
+
+  locals: function (options) {
     return {
       friendlyTestName: ['Unit', 'Initializer', options.entity.name].join(' | '),
-      modulePrefix,
+      modulePrefix: modulePrefixForProject(options.project),
       destroyAppExists: fs.existsSync(
         path.join(this.project.root, '/tests/helpers/destroy-app.js')
       ),

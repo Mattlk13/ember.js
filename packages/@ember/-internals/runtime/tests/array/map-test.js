@@ -1,9 +1,9 @@
 import { guidFor } from '@ember/-internals/utils';
 import { AbstractTestCase } from 'internal-test-helpers';
 import { runArrayTests } from '../helpers/array';
-import { get } from '@ember/-internals/metal';
+import { get } from '@ember/object';
 
-const mapFunc = item => (item ? item.toString() : null);
+const mapFunc = (item) => (item ? item.toString() : null);
 
 class MapTests extends AbstractTestCase {
   '@test map should iterate over list'() {

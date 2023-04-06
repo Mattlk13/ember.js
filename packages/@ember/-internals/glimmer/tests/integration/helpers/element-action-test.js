@@ -1,12 +1,7 @@
 import { RenderingTestCase, moduleFor, strip, runTask } from 'internal-test-helpers';
 
-import { set } from '@ember/-internals/metal';
-import {
-  subscribe as instrumentationSubscribe,
-  reset as instrumentationReset,
-} from '@ember/instrumentation';
-import { EMBER_IMPROVED_INSTRUMENTATION } from '@ember/canary-features';
-import { Object as EmberObject, A as emberA } from '@ember/-internals/runtime';
+import EmberObject, { set } from '@ember/object';
+import { A as emberA } from '@ember/array';
 import { ActionManager } from '@ember/-internals/views';
 
 import { Component } from '../../utils/helpers';
@@ -27,63 +22,8 @@ function getActionAttributes(element) {
 }
 
 function getActionIds(element) {
-  return getActionAttributes(element).map(attribute =>
+  return getActionAttributes(element).map((attribute) =>
     attribute.slice('data-ember-action-'.length)
-  );
-}
-
-const isIE11 = !window.ActiveXObject && 'ActiveXObject' in window;
-
-if (EMBER_IMPROVED_INSTRUMENTATION) {
-  moduleFor(
-    'Helpers test: element action instrumentation',
-    class extends RenderingTestCase {
-      teardown() {
-        super.teardown();
-        instrumentationReset();
-      }
-
-      ['@test action should fire interaction event with proper params']() {
-        let subscriberCallCount = 0;
-        let subscriberPayload = null;
-
-        let ExampleComponent = Component.extend({
-          actions: {
-            foo() {},
-          },
-        });
-
-        this.registerComponent('example-component', {
-          ComponentClass: ExampleComponent,
-          template: '<button {{action "foo" "bar"}}>Click me</button>',
-        });
-
-        instrumentationSubscribe('interaction.ember-action', {
-          before() {
-            subscriberCallCount++;
-          },
-          after(name, time, payload) {
-            subscriberPayload = payload;
-          },
-        });
-
-        this.render('{{example-component}}');
-
-        this.assert.equal(subscriberCallCount, 0, 'subscriber has not been called');
-
-        runTask(() => this.rerender());
-
-        this.assert.equal(subscriberCallCount, 0, 'subscriber has not been called');
-
-        runTask(() => {
-          this.$('button').click();
-        });
-
-        this.assert.equal(subscriberCallCount, 1, 'subscriber has been called 1 time');
-        this.assert.equal(subscriberPayload.name, 'foo', 'subscriber called with correct name');
-        this.assert.equal(subscriberPayload.args[0], 'bar', 'subscriber called with correct args');
-      }
-    }
   );
 }
 
@@ -146,7 +86,7 @@ moduleFor(
 
       this.registerComponent('example-component', {
         ComponentClass: ExampleComponent,
-        template: '<button {{action "foo" member}}>Click me</button>',
+        template: '<button {{action "foo" this.member}}>Click me</button>',
       });
 
       this.render('{{example-component}}');
@@ -280,7 +220,7 @@ moduleFor(
 
       this.registerComponent('other-component', {
         ComponentClass: OtherComponent,
-        template: '<a {{action "wat" target=anotherTarget}}>Wat?</a>',
+        template: '<a {{action "wat" target=this.anotherTarget}}>Wat?</a>',
       });
 
       this.render(strip`
@@ -323,7 +263,7 @@ moduleFor(
 
       this.registerComponent('example-component', {
         ComponentClass: ExampleComponent,
-        template: '<a {{action "edit" target=theTarget}}>Edit</a>',
+        template: '<a {{action "edit" target=this.theTarget}}>Edit</a>',
       });
 
       this.render('{{example-component}}');
@@ -406,7 +346,7 @@ moduleFor(
       this.registerComponent('example-component', {
         ComponentClass: ExampleComponent,
         template:
-          '<a href="#" {{action "edit" allowedKeys=altKey}}>click me</a> <div {{action "shortcut" allowedKeys=anyKey}}>click me too</div>',
+          '<a href="#" {{action "edit" allowedKeys=this.altKey}}>click me</a> <div {{action "shortcut" allowedKeys=this.anyKey}}>click me too</div>',
       });
 
       this.render('{{example-component}}');
@@ -447,7 +387,7 @@ moduleFor(
 
       this.registerComponent('example-component', {
         ComponentClass: ExampleComponent,
-        template: '<a href="#" {{action "edit" allowedKeys=acceptedKeys}}>click me</a>',
+        template: '<a href="#" {{action "edit" allowedKeys=this.acceptedKeys}}>click me</a>',
       });
 
       this.render('{{example-component}}');
@@ -629,7 +569,7 @@ moduleFor(
       this.registerComponent('example-component', {
         ComponentClass: ExampleComponent,
         template:
-          '<a id="edit" href="#" {{action "edit" bubbles=isFalse}}>edit</a><a id="delete" href="#" {{action "delete" bubbles=isFalse}}>delete</a>',
+          '<a id="edit" href="#" {{action "edit" bubbles=this.isFalse}}>edit</a><a id="delete" href="#" {{action "delete" bubbles=this.isFalse}}>delete</a>',
       });
 
       this.render('{{example-component}}');
@@ -686,7 +626,7 @@ moduleFor(
 
       this.registerComponent('example-component', {
         ComponentClass: ExampleComponent,
-        template: '<a id="edit" href="#" {{action "edit" bubbles=shouldBubble}}>edit</a>',
+        template: '<a id="edit" href="#" {{action "edit" bubbles=this.shouldBubble}}>edit</a>',
       });
 
       this.render('{{example-component}}');
@@ -765,7 +705,8 @@ moduleFor(
 
       this.registerComponent('example-component', {
         ComponentClass: ExampleComponent,
-        template: '{{#each items as |item|}}<a href="#" {{action "edit"}}>click me</a>{{/each}}',
+        template:
+          '{{#each this.items as |item|}}<a href="#" {{action "edit"}}>click me</a>{{/each}}',
       });
 
       this.render('{{example-component}}');
@@ -777,7 +718,7 @@ moduleFor(
       this.assert.equal(editHandlerWasCalled, true, 'the event handler was called');
     }
 
-    ['@test it should work properly in a {{#with foo as |bar|}} block']() {
+    ['@test it should work properly in a {{#let foo as |bar|}} block']() {
       let editHandlerWasCalled = false;
 
       let ExampleComponent = Component.extend({
@@ -792,7 +733,7 @@ moduleFor(
       this.registerComponent('example-component', {
         ComponentClass: ExampleComponent,
         template:
-          '{{#with something as |somethingElse|}}<a href="#" {{action "edit"}}>click me</a>{{/with}}',
+          '{{#let this.something as |somethingElse|}}<a href="#" {{action "edit"}}>click me</a>{{/let}}',
       });
 
       this.render('{{example-component}}');
@@ -813,10 +754,10 @@ moduleFor(
 
       this.registerComponent('example-component', {
         ComponentClass: ExampleComponent,
-        template: '{{#if isActive}}<a href="#" {{action "edit"}}>click me</a>{{/if}}',
+        template: '{{#if this.isActive}}<a href="#" {{action "edit"}}>click me</a>{{/if}}',
       });
 
-      this.render('{{example-component isActive=isActive}}', {
+      this.render('{{example-component isActive=this.isActive}}', {
         isActive: true,
       });
 
@@ -1064,7 +1005,7 @@ moduleFor(
 
       this.registerComponent('example-component', {
         ComponentClass: ExampleComponent,
-        template: '<button {{action "edit" modelA modelB}}>click me</button>',
+        template: '<button {{action "edit" this.modelA this.modelB}}>click me</button>',
       });
 
       this.render('{{example-component}}');
@@ -1143,11 +1084,7 @@ moduleFor(
           .trigger('click', { [prop]: value })[0];
         if (expected) {
           assert.ok(showCalled, `should call action with ${prop}:${value}`);
-
-          // IE11 does not allow simulated events to have a valid `defaultPrevented`
-          if (!isIE11) {
-            assert.ok(event.defaultPrevented, 'should prevent default');
-          }
+          assert.ok(event.defaultPrevented, 'should prevent default');
         } else {
           assert.notOk(showCalled, `should not call action with ${prop}:${value}`);
           assert.notOk(event.defaultPrevented, 'should not prevent default');
@@ -1220,22 +1157,20 @@ moduleFor(
 
       this.registerComponent('example-component', {
         ComponentClass: ExampleComponent,
-        template: '<a id="bound-param" {{action hookMeUp}}>Whistle tips go woop woooop</a>',
+        template: '<a id="bound-param" {{action this.hookMeUp}}>Whistle tips go woop woooop</a>',
       });
 
       this.render('{{example-component}}');
 
       let test = this;
 
-      let testBoundAction = propertyValue => {
+      let testBoundAction = (propertyValue) => {
         runTask(() => {
           component.set('hookMeUp', propertyValue);
         });
 
         runTask(() => {
-          this.wrap(component.element)
-            .findAll('#bound-param')
-            .click();
+          this.wrap(component.element).findAll('#bound-param').click();
         });
 
         test.assert.ok(lastAction, propertyValue, `lastAction set to ${propertyValue}`);
@@ -1286,18 +1221,16 @@ moduleFor(
       this.registerComponent('example-component', {
         ComponentClass: ExampleComponent,
         template:
-          '{{#each allactions as |allaction|}}<a id="{{allaction.name}}" {{action allaction.name}}>{{allaction.title}}</a>{{/each}}',
+          '{{#each this.allactions as |allaction|}}<a id="{{allaction.name}}" {{action allaction.name}}>{{allaction.title}}</a>{{/each}}',
       });
 
       this.render('{{example-component}}');
 
       let test = this;
 
-      let testBoundAction = propertyValue => {
+      let testBoundAction = (propertyValue) => {
         runTask(() => {
-          this.wrap(component.element)
-            .findAll(`#${propertyValue}`)
-            .click();
+          this.wrap(component.element).findAll(`#${propertyValue}`).click();
         });
 
         test.assert.ok(lastAction, propertyValue, `lastAction set to ${propertyValue}`);
@@ -1329,7 +1262,7 @@ moduleFor(
 
       this.registerComponent('example-component', {
         ComponentClass: ExampleComponent,
-        template: `<a {{action submit '${arg}'}}>Hi</a>`,
+        template: `<a {{action this.submit '${arg}'}}>Hi</a>`,
       });
 
       this.render('{{example-component}}');
@@ -1351,12 +1284,12 @@ moduleFor(
 
       this.registerComponent('example-component', {
         ComponentClass: ExampleComponent,
-        template: '<a id="oops-bound-param" {{action ohNoeNotValid}}>Hi</a>',
+        template: '<a id="oops-bound-param" {{action this.ohNoeNotValid}}>Hi</a>',
       });
 
       expectAssertion(() => {
         this.render('{{example-component}}');
-      }, 'You specified a quoteless path, `ohNoeNotValid`, to the {{action}} helper ' + 'which did not resolve to an action name (a string). ' + 'Perhaps you meant to use a quoted actionName? (e.g. {{action "ohNoeNotValid"}}).');
+      }, 'You specified a quoteless path, `this.ohNoeNotValid`, to the {{action}} helper ' + 'which did not resolve to an action name (a string). ' + 'Perhaps you meant to use a quoted actionName? (e.g. {{action "ohNoeNotValid"}}).');
     }
 
     ['@test allows multiple actions on a single element']() {
@@ -1471,7 +1404,7 @@ moduleFor(
 
       this.registerComponent('example-component', {
         ComponentClass: ExampleComponent,
-        template: '<a {{action "show" preventDefault=shouldPreventDefault}}>Hi</a>',
+        template: '<a {{action "show" preventDefault=this.shouldPreventDefault}}>Hi</a>',
       });
 
       this.render('{{example-component}}');
@@ -1489,10 +1422,7 @@ moduleFor(
         event = this.$('a').trigger('click')[0];
       });
 
-      // IE11 does not allow simulated events to have a valid `defaultPrevented`
-      if (!isIE11) {
-        this.assert.equal(event.defaultPrevented, true, 'should preventDefault');
-      }
+      this.assert.equal(event.defaultPrevented, true, 'should preventDefault');
     }
 
     ['@test it should target the proper component when `action` is in yielded block [GH #12409]']() {
@@ -1512,9 +1442,7 @@ moduleFor(
       let InnerComponent = Component.extend({
         click() {
           innerClickCalled = true;
-          expectDeprecation(() => {
-            this.sendAction();
-          }, /You called (.*).sendAction\((.*)\) but Component#sendAction is deprecated. Please use closure actions instead./);
+          this.action();
         },
       });
 
@@ -1522,7 +1450,7 @@ moduleFor(
         ComponentClass: OuterComponent,
         template: strip`
         {{#middle-component}}
-          {{inner-component action="hey"}}
+          {{inner-component action=(action "hey")}}
         {{/middle-component}}
       `,
       });
@@ -1564,7 +1492,7 @@ moduleFor(
       this.registerComponent('example-component', {
         ComponentClass: ExampleComponent,
         template:
-          '<button {{action (mut label) "Clicked!"}}>{{if label label "Click me"}}</button>',
+          '<button {{action (mut this.label) "Clicked!"}}>{{if this.label this.label "Click me"}}</button>',
       });
 
       this.render('{{example-component}}');
@@ -1601,21 +1529,16 @@ moduleFor(
     ['@test it supports non-registered actions [GH#14888]']() {
       this.render(
         `
-      {{#if show}}
-        <button id='ddButton' {{action (mut show) false}}>
-          Show ({{show}})
+      {{#if this.show}}
+        <button id='ddButton' {{action (mut this.show) false}}>
+          Show ({{this.show}})
         </button>
       {{/if}}
     `,
         { show: true }
       );
 
-      this.assert.equal(
-        this.$('button')
-          .text()
-          .trim(),
-        'Show (true)'
-      );
+      this.assert.equal(this.$('button').text().trim(), 'Show (true)');
       // We need to focus in to simulate an actual click.
       runTask(() => {
         document.getElementById('ddButton').focus();
@@ -1638,7 +1561,7 @@ moduleFor(
       this.registerComponent('example-component', {
         ComponentClass: ExampleComponent,
         template:
-          '<button class="{{if selected \'selected\'}}" {{action "toggleSelected"}}>Toggle Selected</button>',
+          '<button class="{{if this.selected \'selected\'}}" {{action "toggleSelected"}}>Toggle Selected</button>',
       });
 
       this.render('{{example-component}}');
@@ -1662,131 +1585,6 @@ moduleFor(
         !this.$('button').hasClass('selected'),
         "Element with action handler has properly updated it's conditional class"
       );
-    }
-
-    ['@test [DEPRECATED] it should support mouseEnter events']() {
-      let showCalled = false;
-
-      let ExampleComponent = Component.extend({
-        actions: {
-          show() {
-            showCalled = true;
-          },
-        },
-      });
-
-      this.registerComponent('example-component', {
-        ComponentClass: ExampleComponent,
-        template: '<div id="inner" {{action "show" on="mouseEnter"}}></div>',
-      });
-
-      expectDeprecation(
-        () => this.render('{{example-component id="outer"}}'),
-        'Using the `{{action}}` modifier with `mouseEnter` events has been deprecated.'
-      );
-
-      let parent = this.element;
-      let outer = this.$('#outer')[0];
-      let inner = this.$('#inner')[0];
-
-      runTask(() => {
-        this.$(outer).trigger('mouseenter', { canBubble: false, relatedTarget: parent });
-        this.$(inner).trigger('mouseover', { relatedTarget: parent });
-        this.$(parent).trigger('mouseout', { relatedTarget: inner });
-      });
-
-      this.assert.ok(showCalled, 'show action was called on mouseEnter');
-    }
-
-    ['@test [DEPRECATED] it should support mouseLeave events']() {
-      let showCalled = false;
-
-      let ExampleComponent = Component.extend({
-        actions: {
-          show() {
-            showCalled = true;
-          },
-        },
-      });
-
-      this.registerComponent('example-component', {
-        ComponentClass: ExampleComponent,
-        template: '<div id="inner" {{action "show" on="mouseLeave"}}></div>',
-      });
-
-      expectDeprecation(
-        () => this.render('{{example-component id="outer"}}'),
-        'Using the `{{action}}` modifier with `mouseLeave` events has been deprecated.'
-      );
-
-      let parent = this.element;
-      let outer = this.$('#outer')[0];
-      let inner = this.$('#inner')[0];
-
-      runTask(() => {
-        this.$(outer).trigger('mouseleave', { canBubble: false, relatedTarget: parent });
-        this.$(inner).trigger('mouseout', { relatedTarget: parent });
-        this.$(parent).trigger('mouseover', { relatedTarget: inner });
-      });
-
-      this.assert.ok(showCalled, 'show action was called on mouseLeave');
-    }
-
-    ['@test [DEPRECATED] it should support mouseMove events']() {
-      let showCalled = false;
-
-      let ExampleComponent = Component.extend({
-        actions: {
-          show() {
-            showCalled = true;
-          },
-        },
-      });
-
-      this.registerComponent('example-component', {
-        ComponentClass: ExampleComponent,
-        template: '<div id="inner" {{action "show" on="mouseMove"}}></div>',
-      });
-
-      expectDeprecation(
-        () => this.render('{{example-component id="outer"}}'),
-        'Using the `{{action}}` modifier with `mouseMove` events has been deprecated.'
-      );
-
-      runTask(() => {
-        this.$('#inner').trigger('mousemove');
-      });
-
-      this.assert.ok(showCalled, 'show action was called on mouseMove');
-    }
-
-    ['@test [DEPRECATED] it should support bound mouseMove events']() {
-      let showCalled = false;
-
-      let ExampleComponent = Component.extend({
-        eventType: 'mouseMove',
-        actions: {
-          show() {
-            showCalled = true;
-          },
-        },
-      });
-
-      this.registerComponent('example-component', {
-        ComponentClass: ExampleComponent,
-        template: '<div id="inner" {{action "show" on=eventType}}></div>',
-      });
-
-      expectDeprecation(
-        () => this.render('{{example-component id="outer"}}'),
-        'Using the `{{action}}` modifier with `mouseMove` events has been deprecated.'
-      );
-
-      runTask(() => {
-        this.$('#inner').trigger('mousemove');
-      });
-
-      this.assert.ok(showCalled, 'show action was called on mouseMove');
     }
   }
 );

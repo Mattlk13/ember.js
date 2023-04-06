@@ -1,7 +1,6 @@
 import { DEBUG } from '@glimmer/env';
 import { getDebugFunction, setDebugFunction } from '@ember/debug';
 import { Libraries } from '..';
-import { EMBER_LIBRARIES_ISREGISTERED } from '@ember/canary-features';
 import { moduleFor, AbstractTestCase } from 'internal-test-helpers';
 
 let libs, registry;
@@ -36,7 +35,7 @@ moduleFor(
     ['@test only the first registration of a library is stored'](assert) {
       assert.expect(3);
 
-      // overwrite warn to supress the double registration warning (see https://github.com/emberjs/ember.js/issues/16391)
+      // overwrite warn to suppress the double registration warning (see https://github.com/emberjs/ember.js/issues/16391)
       setDebugFunction('warn', noop);
       libs.register('magic', 1.23);
       libs.register('magic', 2.23);
@@ -44,22 +43,6 @@ moduleFor(
       assert.equal(registry[0].name, 'magic');
       assert.equal(registry[0].version, 1.23);
       assert.equal(registry.length, 1);
-    }
-
-    ['@test isRegistered returns correct value'](assert) {
-      if (EMBER_LIBRARIES_ISREGISTERED) {
-        assert.expect(3);
-
-        assert.equal(libs.isRegistered('magic'), false);
-
-        libs.register('magic', 1.23);
-        assert.equal(libs.isRegistered('magic'), true);
-
-        libs.deRegister('magic');
-        assert.equal(libs.isRegistered('magic'), false);
-      } else {
-        assert.expect(0);
-      }
     }
 
     ['@test attempting to register a library that is already registered warns you'](assert) {
@@ -72,7 +55,7 @@ moduleFor(
 
       libs.register('magic', 1.23);
 
-      setDebugFunction('warn', function(msg, test) {
+      setDebugFunction('warn', function (msg, test) {
         if (!test) {
           assert.equal(msg, 'Library "magic" is already registered with Ember.');
         }

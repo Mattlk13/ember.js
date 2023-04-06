@@ -1,6 +1,6 @@
 import { AbstractTestCase } from 'internal-test-helpers';
 import { runArrayTests } from '../helpers/array';
-import { get, set } from '@ember/-internals/metal';
+import { get, set } from '@ember/object';
 
 class LastObjectTests extends AbstractTestCase {
   '@test returns last item in enumerable'() {
@@ -22,7 +22,7 @@ class LastObjectTests extends AbstractTestCase {
 
     this.assert.equal(get(obj, 'lastObject'), ary[ary.length - 1]);
 
-    this.assert.throws(function() {
+    this.assert.throws(function () {
       set(obj, 'lastObject', 'foo!');
     }, /Cannot set read-only property "lastObject" on object/);
   }

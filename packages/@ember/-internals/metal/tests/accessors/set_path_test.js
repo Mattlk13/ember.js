@@ -58,6 +58,34 @@ moduleFor(
       set(obj, 'foo.bar', 'BAM');
       assert.equal(get(obj, 'foo.bar'), 'BAM');
     }
+
+    ['@test ignores attempts to traverse through dangerous built-in Object properties'](assert) {
+      class Inner {}
+      class Example {
+        inner = new Inner();
+      }
+      let example = new Example();
+
+      assert.throws(() => {
+        set(example, '__proto__.ohNo', 'polluted');
+      }, /Property set failed: object in path "__proto__" could not be found./);
+      assert.equal(Example.prototype.ohNo, undefined, 'check for prototype pollution');
+
+      assert.throws(() => {
+        set(example, 'constructor.ohNo', 'polluted');
+      }, /Property set failed: object in path "constructor" could not be found./);
+      assert.equal(Example.ohNo, undefined, 'check for prototype pollution');
+
+      assert.throws(() => {
+        set(example, 'inner.__proto__.ohNo', 'polluted');
+      }, /Property set failed: object in path "inner.__proto__" could not be found./);
+      assert.equal(Inner.prototype.ohNo, undefined, 'check for prototype pollution');
+
+      assert.throws(() => {
+        set(example, 'inner.constructor.ohNo', 'polluted');
+      }, /Property set failed: object in path "inner.constructor" could not be found./);
+      assert.equal(Inner.ohNo, undefined, 'check for prototype pollution');
+    }
   }
 );
 
@@ -85,11 +113,11 @@ moduleFor(
       }
     }
 
-    ['@test [obj, foo.baz.bat] -> EXCEPTION'](assert) {
+    ['@test set(xobj, foo.baz.bat, ...) -> EXCEPTION'](assert) {
       assert.throws(() => set(obj, 'foo.baz.bat', 'BAM'));
     }
 
-    ['@test [obj, foo.baz.bat] -> EXCEPTION'](assert) {
+    ['@test trySet(obj, foo.baz.bat, ...)'](assert) {
       trySet(obj, 'foo.baz.bat', 'BAM');
       assert.ok(true, 'does not raise');
     }

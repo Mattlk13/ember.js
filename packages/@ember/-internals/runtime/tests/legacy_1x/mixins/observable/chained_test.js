@@ -1,6 +1,6 @@
-import { get, set, addObserver } from '@ember/-internals/metal';
-import EmberObject from '../../../../lib/system/object';
-import { A as emberA } from '../../../../lib/mixins/array';
+import { addObserver } from '@ember/-internals/metal';
+import EmberObject, { get, set } from '@ember/object';
+import { A as emberA } from '@ember/array';
 import { moduleFor, AbstractTestCase, runLoopSettled } from 'internal-test-helpers';
 
 /*
@@ -32,7 +32,7 @@ moduleFor(
       set(momma, 'children', emberA([child1, child2, child3]));
 
       let observerFiredCount = 0;
-      addObserver(family, 'momma.children.@each.name', this, function() {
+      addObserver(family, 'momma.children.@each.name', this, function () {
         observerFiredCount++;
       });
 
@@ -68,6 +68,13 @@ moduleFor(
         0,
         'observer did not fire after removing changing property on a removed object'
       );
+
+      family.destroy();
+      momma.destroy();
+      child1.destroy();
+      child2.destroy();
+      child3.destroy();
+      child4.destroy();
     }
   }
 );

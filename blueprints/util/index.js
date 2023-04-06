@@ -1,32 +1,18 @@
 'use strict';
 
-const path = require('path');
-const isModuleUnificationProject = require('../module-unification').isModuleUnificationProject;
+const maybePolyfillTypeScriptBlueprints = require('../-maybe-polyfill-typescript-blueprints');
 
 module.exports = {
   description: 'Generates a simple utility module/function.',
 
-  fileMapTokens() {
-    if (isModuleUnificationProject(this.project)) {
-      return {
-        __root__(options) {
-          if (options.pod) {
-            throw new Error("Pods aren't supported within a module unification app");
-          }
+  shouldTransformTypeScript: true,
 
-          if (options.inDummy) {
-            return path.join('tests', 'dummy', 'src');
-          }
-
-          return 'src';
-        },
-        __testType__() {
-          return '';
-        },
-      };
-    }
+  init() {
+    this._super && this._super.init.apply(this, arguments);
+    maybePolyfillTypeScriptBlueprints(this);
   },
-  normalizeEntityName: function(entityName) {
+
+  normalizeEntityName: function (entityName) {
     return entityName.replace(/\.js$/, ''); //Prevent generation of ".js.js" files
   },
 };

@@ -1,6 +1,6 @@
 import { AbstractTestCase } from 'internal-test-helpers';
 import { runArrayTests } from '../helpers/array';
-import EmberObject from '../../lib/system/object';
+import EmberObject from '@ember/object';
 
 class EveryTest extends AbstractTestCase {
   '@test every should should invoke callback on each item as long as you return true'() {
@@ -9,7 +9,7 @@ class EveryTest extends AbstractTestCase {
     let found = [];
     let result;
 
-    result = obj.every(function(i) {
+    result = obj.every(function (i) {
       found.push(i);
       return true;
     });
@@ -25,7 +25,7 @@ class EveryTest extends AbstractTestCase {
     let found = [];
     let result;
 
-    result = obj.every(function(i) {
+    result = obj.every(function (i) {
       found.push(i);
       return --cnt > 0;
     });

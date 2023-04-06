@@ -1,18 +1,17 @@
-import { run, schedule, getCurrentRunLoop } from '..';
-import EmberError from '@ember/error';
+import { run, schedule, _getCurrentRunLoop } from '..';
 import { moduleFor, AbstractTestCase } from 'internal-test-helpers';
 
 moduleFor(
   'system/run_loop/unwind_test',
   class extends AbstractTestCase {
     ['@test RunLoop unwinds despite unhandled exception'](assert) {
-      let initialRunLoop = getCurrentRunLoop();
+      let initialRunLoop = _getCurrentRunLoop();
 
       assert.throws(
         () => {
           run(() => {
-            schedule('actions', function() {
-              throw new EmberError('boom!');
+            schedule('actions', function () {
+              throw new Error('boom!');
             });
           });
         },
@@ -25,27 +24,27 @@ moduleFor(
       // flushed. I can't easily demonstrate this in a unit test because
       // autorun explicitly doesn't work in test mode. - ef4
       assert.equal(
-        getCurrentRunLoop(),
+        _getCurrentRunLoop(),
         initialRunLoop,
         'Previous run loop should be cleaned up despite exception'
       );
     }
 
     ['@test run unwinds despite unhandled exception'](assert) {
-      let initialRunLoop = getCurrentRunLoop();
+      let initialRunLoop = _getCurrentRunLoop();
 
       assert.throws(
         () => {
-          run(function() {
-            throw new EmberError('boom!');
+          run(function () {
+            throw new Error('boom!');
           });
         },
-        EmberError,
+        Error,
         'boom!'
       );
 
       assert.equal(
-        getCurrentRunLoop(),
+        _getCurrentRunLoop(),
         initialRunLoop,
         'Previous run loop should be cleaned up despite exception'
       );

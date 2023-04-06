@@ -5,8 +5,8 @@ moduleFor('service:<%= dasherizedModuleName %>', '<%= friendlyTestDescription %>
   // needs: ['service:foo']
 });
 
-// Replace this with your real tests.
-test('it exists', function(assert) {
+// TODO: Replace this with your real tests.
+test('it exists', function (assert) {
   let service = this.subject();
   assert.ok(service);
 });

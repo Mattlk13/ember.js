@@ -1,5 +1,4 @@
 import { ENV } from '@ember/-internals/environment';
-import { assign } from '@ember/polyfills';
 
 /**
   Set `EmberENV.FEATURES` in your application's `config/environment.js` file
@@ -13,13 +12,7 @@ import { assign } from '@ember/polyfills';
 */
 
 export const DEFAULT_FEATURES = {
-  EMBER_LIBRARIES_ISREGISTERED: null,
-  EMBER_IMPROVED_INSTRUMENTATION: null,
-  EMBER_MODULE_UNIFICATION: false,
-  EMBER_METAL_TRACKED_PROPERTIES: true,
-  EMBER_CUSTOM_COMPONENT_ARG_PROXY: true,
-  EMBER_GLIMMER_SET_COMPONENT_TEMPLATE: true,
-  EMBER_ROUTING_MODEL_ARG: true,
+  // FLAG_NAME: true/false
 };
 
 /**
@@ -31,7 +24,7 @@ export const DEFAULT_FEATURES = {
   @since 1.1.0
   @public
 */
-export const FEATURES = assign(DEFAULT_FEATURES, ENV.FEATURES);
+export const FEATURES = Object.assign(DEFAULT_FEATURES, ENV.FEATURES);
 
 /**
   Determine whether the specified `feature` is enabled. Used by Ember's
@@ -49,10 +42,10 @@ export const FEATURES = assign(DEFAULT_FEATURES, ENV.FEATURES);
   @public
 */
 export function isEnabled(feature: string): boolean {
-  let featureValue = FEATURES[feature];
+  let value = FEATURES[feature];
 
-  if (featureValue === true || featureValue === false) {
-    return featureValue;
+  if (value === true || value === false) {
+    return value;
   } else if (ENV.ENABLE_OPTIONAL_FEATURES) {
     return true;
   } else {
@@ -60,22 +53,14 @@ export function isEnabled(feature: string): boolean {
   }
 }
 
-function featureValue(value: null | boolean) {
-  if (ENV.ENABLE_OPTIONAL_FEATURES && value === null) {
-    return true;
-  }
+// Uncomment the below when features are present:
 
-  return value;
-}
+// function featureValue(value: null | boolean) {
+//   if (ENV.ENABLE_OPTIONAL_FEATURES && value === null) {
+//     return true;
+//   }
 
-export const EMBER_LIBRARIES_ISREGISTERED = featureValue(FEATURES.EMBER_LIBRARIES_ISREGISTERED);
-export const EMBER_IMPROVED_INSTRUMENTATION = featureValue(FEATURES.EMBER_IMPROVED_INSTRUMENTATION);
-export const EMBER_MODULE_UNIFICATION = featureValue(FEATURES.EMBER_MODULE_UNIFICATION);
-export const EMBER_METAL_TRACKED_PROPERTIES = featureValue(FEATURES.EMBER_METAL_TRACKED_PROPERTIES);
-export const EMBER_CUSTOM_COMPONENT_ARG_PROXY = featureValue(
-  FEATURES.EMBER_CUSTOM_COMPONENT_ARG_PROXY
-);
-export const EMBER_GLIMMER_SET_COMPONENT_TEMPLATE = featureValue(
-  FEATURES.EMBER_GLIMMER_SET_COMPONENT_TEMPLATE
-);
-export const EMBER_ROUTING_MODEL_ARG = featureValue(FEATURES.EMBER_ROUTING_MODEL_ARG);
+//   return value;
+// }
+
+// export const FLAG_NAME = featureValue(FEATURES.FLAG_NAME);

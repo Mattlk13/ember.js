@@ -1,7 +1,3 @@
-import { PathReference } from '@glimmer/reference';
-import { Arguments, VM } from '@glimmer/runtime';
-import { Opaque } from '@glimmer/util';
-
 /**
 @module ember
 */
@@ -12,7 +8,7 @@ import { Opaque } from '@glimmer/util';
 
    ```handlebars
    <MyComponent @people={{array
-     'Tom Dade'
+     'Tom Dale'
      'Yehuda Katz'
      this.myOtherPerson}}
    />
@@ -20,7 +16,7 @@ import { Opaque } from '@glimmer/util';
     or
    ```handlebars
    {{my-component people=(array
-     'Tom Dade'
+     'Tom Dale'
      'Yehuda Katz'
      this.myOtherPerson)
    }}
@@ -29,19 +25,15 @@ import { Opaque } from '@glimmer/util';
    Would result in an object such as:
 
    ```js
-   ['Tom Date', 'Yehuda Katz', this.get('myOtherPerson')]
+   ['Tom Dale', 'Yehuda Katz', this.get('myOtherPerson')]
    ```
 
    Where the 3rd item in the array is bound to updates of the `myOtherPerson` property.
 
    @method array
-   @for Ember.Templates.helpers
+   @for @ember/helper
    @param {Array} options
    @return {Array} Array
    @since 3.8.0
    @public
  */
-
-export default function(_vm: VM, args: Arguments): PathReference<Opaque[]> {
-  return args.positional.capture();
-}

@@ -1,4 +1,4 @@
-import EmberObject from '../../lib/system/object';
+import EmberObject from '@ember/object';
 import { AbstractTestCase } from 'internal-test-helpers';
 import { runArrayTests } from '../helpers/array';
 
@@ -9,7 +9,7 @@ class FindTests extends AbstractTestCase {
     let found = [];
     let result;
 
-    result = obj.find(function(i) {
+    result = obj.find(function (i) {
       found.push(i);
       return false;
     });
@@ -25,7 +25,7 @@ class FindTests extends AbstractTestCase {
     let found = [];
     let result;
 
-    result = obj.find(function(i) {
+    result = obj.find(function (i) {
       found.push(i);
       return --cnt >= 0;
     });

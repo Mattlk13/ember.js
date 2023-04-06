@@ -2,21 +2,35 @@ import { ENV } from '@ember/-internals/environment';
 import { DEBUG } from '@glimmer/env';
 
 import { assert } from '../index';
-import { HandlerCallback, invoke, registerHandler as genericRegisterHandler } from './handlers';
+import type { HandlerCallback } from './handlers';
+import { invoke, registerHandler as genericRegisterHandler } from './handlers';
 
-declare global {
-  const __fail__: {
-    fail(): void;
-  };
+// This is a "global", but instead of declaring it as `declare global`, which
+// will expose it to all other modules, declare it *locally* (and don't export
+// it) so that it has the desired "private global" semantics -- however odd that
+// particular notion is.
+declare const __fail__: {
+  fail(): void;
+};
+
+interface Available {
+  available: string;
+}
+
+interface Enabled extends Available {
+  enabled: string;
 }
 
 export interface DeprecationOptions {
   id: string;
   until: string;
   url?: string;
+  for: string;
+  since: Available | Enabled;
 }
 
 export type DeprecateFunc = (message: string, test?: boolean, options?: DeprecationOptions) => void;
+export type MissingOptionDeprecateFunc = (id: string, missingOption: string) => string;
 
 /**
  @module @ember/debug
@@ -60,25 +74,29 @@ export type DeprecateFunc = (message: string, test?: boolean, options?: Deprecat
   @param handler {Function} A function to handle deprecation calls.
   @since 2.1.0
 */
-let registerHandler: (handler: HandlerCallback) => void = () => {};
+let registerHandler: (handler: HandlerCallback<DeprecationOptions>) => void = () => {};
 let missingOptionsDeprecation: string;
 let missingOptionsIdDeprecation: string;
-let missingOptionsUntilDeprecation: string;
+let missingOptionDeprecation: MissingOptionDeprecateFunc = () => '';
 let deprecate: DeprecateFunc = () => {};
 
 if (DEBUG) {
-  registerHandler = function registerHandler(handler: HandlerCallback) {
+  registerHandler = function registerHandler(handler: HandlerCallback<DeprecationOptions>): void {
     genericRegisterHandler('deprecate', handler);
   };
 
   let formatMessage = function formatMessage(_message: string, options?: DeprecationOptions) {
     let message = _message;
 
-    if (options && options.id) {
+    if (options?.id) {
       message = message + ` [deprecation id: ${options.id}]`;
     }
 
-    if (options && options.url) {
+    if (options?.until) {
+      message = message + ` This will be removed in ${options.for} ${options.until}.`;
+    }
+
+    if (options?.url) {
       message += ` See ${options.url} for more details.`;
     }
 
@@ -90,7 +108,7 @@ if (DEBUG) {
     console.warn(`DEPRECATION: ${updatedMessage}`); // eslint-disable-line no-console
   });
 
-  let captureErrorForStack: () => Error;
+  let captureErrorForStack: () => unknown;
 
   if (new Error().stack) {
     captureErrorForStack = () => new Error();
@@ -98,6 +116,7 @@ if (DEBUG) {
     captureErrorForStack = () => {
       try {
         __fail__.fail();
+        return;
       } catch (e) {
         return e;
       }
@@ -110,24 +129,26 @@ if (DEBUG) {
       let error = captureErrorForStack();
       let stack;
 
-      if (error.stack) {
-        if (error['arguments']) {
-          // Chrome
-          stack = error.stack
-            .replace(/^\s+at\s+/gm, '')
-            .replace(/^([^\(]+?)([\n$])/gm, '{anonymous}($1)$2')
-            .replace(/^Object.<anonymous>\s*\(([^\)]+)\)/gm, '{anonymous}($1)')
-            .split('\n');
-          stack.shift();
-        } else {
-          // Firefox
-          stack = error.stack
-            .replace(/(?:\n@:0)?\s+$/m, '')
-            .replace(/^\(/gm, '{anonymous}(')
-            .split('\n');
-        }
+      if (error instanceof Error) {
+        if (error.stack) {
+          if ((error as any)['arguments']) {
+            // Chrome
+            stack = error.stack
+              .replace(/^\s+at\s+/gm, '')
+              .replace(/^([^(]+?)([\n$])/gm, '{anonymous}($1)$2')
+              .replace(/^Object.<anonymous>\s*\(([^)]+)\)/gm, '{anonymous}($1)')
+              .split('\n');
+            stack.shift();
+          } else {
+            // Firefox
+            stack = error.stack
+              .replace(/(?:\n@:0)?\s+$/m, '')
+              .replace(/^\(/gm, '{anonymous}(')
+              .split('\n');
+          }
 
-        stackStr = `\n    ${stack.slice(2).join('\n    ')}`;
+          stackStr = `\n    ${stack.slice(2).join('\n    ')}`;
+        }
       }
 
       let updatedMessage = formatMessage(message, options);
@@ -153,7 +174,10 @@ if (DEBUG) {
     'must provide an `options` hash as the third parameter.  ' +
     '`options` should include `id` and `until` properties.';
   missingOptionsIdDeprecation = 'When calling `deprecate` you must provide `id` in options.';
-  missingOptionsUntilDeprecation = 'When calling `deprecate` you must provide `until` in options.';
+
+  missingOptionDeprecation = (id: string, missingOption: string): string => {
+    return `When calling \`deprecate\` you must provide \`${missingOption}\` in options. Missing options.${missingOption} in "${id}" deprecation`;
+  };
   /**
    @module @ember/debug
    @public
@@ -162,8 +186,45 @@ if (DEBUG) {
     Display a deprecation warning with the provided message and a stack trace
     (Chrome and Firefox only).
 
+    Ember itself leverages [Semantic Versioning](https://semver.org) to aid
+    projects in keeping up with changes to the framework. Before any
+    functionality or API is removed, it first flows linearly through a
+    deprecation staging process. The staging process currently contains two
+    stages: available and enabled.
+
+    Deprecations are initially released into the 'available' stage.
+    Deprecations will stay in this stage until the replacement API has been
+    marked as a recommended practice via the RFC process and the addon
+    ecosystem has generally adopted the change.
+
+    Once a deprecation meets the above criteria, it will move into the
+    'enabled' stage where it will remain until the functionality or API is
+    eventually removed.
+
+    For application and addon developers, "available" deprecations are not
+    urgent and "enabled" deprecations require action.
+
     * In a production build, this method is defined as an empty function (NOP).
     Uses of this method in Ember itself are stripped from the ember.prod.js build.
+
+    ```javascript
+    import { deprecate } from '@ember/debug';
+
+    deprecate(
+      'Use of `assign` has been deprecated. Please use `Object.assign` or the spread operator instead.',
+      false,
+      {
+        id: 'ember-polyfills.deprecate-assign',
+        until: '5.0.0',
+        url: 'https://deprecations.emberjs.com/v4.x/#toc_ember-polyfills-deprecate-assign',
+        for: 'ember-source',
+        since: {
+          available: '4.0.0',
+          enabled: '4.0.0',
+        },
+      }
+    );
+    ```
 
     @method deprecate
     @for @ember/debug
@@ -176,16 +237,24 @@ if (DEBUG) {
       "view.helper.select".
     @param {string} options.until The version of Ember when this deprecation
       warning will be removed.
+    @param {String} options.for A namespace for the deprecation, usually the package name
+    @param {Object} options.since Describes when the deprecation became available and enabled.
     @param {String} [options.url] An optional url to the transition guide on the
-      emberjs.com website.
+          emberjs.com website.
     @static
     @public
     @since 1.0.0
   */
-  deprecate = function deprecate(message, test, options) {
+  deprecate = function deprecate(
+    message: string,
+    test?: boolean,
+    options?: DeprecationOptions
+  ): void {
     assert(missingOptionsDeprecation, Boolean(options && (options.id || options.until)));
     assert(missingOptionsIdDeprecation, Boolean(options!.id));
-    assert(missingOptionsUntilDeprecation, Boolean(options!.until));
+    assert(missingOptionDeprecation(options!.id, 'until'), Boolean(options!.until));
+    assert(missingOptionDeprecation(options!.id, 'for'), Boolean(options!.for));
+    assert(missingOptionDeprecation(options!.id, 'since'), Boolean(options!.since));
 
     invoke('deprecate', message, test, options);
   };
@@ -197,5 +266,5 @@ export {
   registerHandler,
   missingOptionsDeprecation,
   missingOptionsIdDeprecation,
-  missingOptionsUntilDeprecation,
+  missingOptionDeprecation,
 };

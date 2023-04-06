@@ -1,44 +1,36 @@
 'use strict';
 
-const stringUtils = require('ember-cli-string-utils');
 const path = require('path');
 
+const maybePolyfillTypeScriptBlueprints = require('../-maybe-polyfill-typescript-blueprints');
+const { modulePrefixForProject } = require('../-utils');
 const useTestFrameworkDetector = require('../test-framework-detector');
-const isModuleUnificationProject = require('../module-unification').isModuleUnificationProject;
 
 module.exports = useTestFrameworkDetector({
   description: 'Generates a util unit test.',
 
-  fileMapTokens() {
-    if (isModuleUnificationProject(this.project)) {
-      return {
-        __root__(options) {
-          if (options.pod) {
-            throw new Error("Pods aren't supported within a module unification app");
-          }
+  shouldTransformTypeScript: true,
 
-          return 'src';
-        },
-        __testType__() {
-          return 'utils';
-        },
-      };
-    } else {
-      return {
-        __root__() {
-          return 'tests';
-        },
-        __testType__() {
-          return path.join('unit', 'utils');
-        },
-      };
-    }
+  init() {
+    this._super && this._super.init.apply(this, arguments);
+    maybePolyfillTypeScriptBlueprints(this);
   },
 
-  locals: function(options) {
+  fileMapTokens() {
+    return {
+      __root__() {
+        return 'tests';
+      },
+      __testType__() {
+        return path.join('unit', 'utils');
+      },
+    };
+  },
+
+  locals: function (options) {
     return {
       friendlyTestName: ['Unit', 'Utility', options.entity.name].join(' | '),
-      dasherizedModulePrefix: stringUtils.dasherize(options.project.config().modulePrefix),
+      modulePrefix: modulePrefixForProject(options.project),
     };
   },
 });

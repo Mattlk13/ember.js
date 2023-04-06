@@ -1,30 +1,18 @@
 'use strict';
 
-const path = require('path');
-const useEditionDetector = require('../edition-detector');
-const isModuleUnificationProject = require('../module-unification').isModuleUnificationProject;
+const maybePolyfillTypeScriptBlueprints = require('../-maybe-polyfill-typescript-blueprints');
 
-module.exports = useEditionDetector({
+module.exports = {
   description: 'Generates a service.',
 
-  fileMapTokens() {
-    if (isModuleUnificationProject(this.project)) {
-      return {
-        __root__(options) {
-          if (options.pod) {
-            throw new Error("Pods aren't supported within a module unification app");
-          }
+  shouldTransformTypeScript: true,
 
-          if (options.inDummy) {
-            return path.join('tests', 'dummy', 'src');
-          }
-
-          return 'src';
-        },
-      };
-    }
+  init() {
+    this._super && this._super.init.apply(this, arguments);
+    maybePolyfillTypeScriptBlueprints(this);
   },
-  normalizeEntityName: function(entityName) {
+
+  normalizeEntityName: function (entityName) {
     return entityName.replace(/\.js$/, ''); //Prevent generation of ".js.js" files
   },
-});
+};
